@@ -10,7 +10,7 @@ import { useCart } from '../contexts/CartContext';
 import { toast } from 'sonner';
 import { useState, useEffect, useCallback } from 'react';
 import {
-  fetchProducts, fetchProductReviews, addProductReview,
+  fetchProducts, fetchProductById, fetchProductReviews, addProductReview,
   addToWishlist, removeFromWishlist, mapApiProduct,
   tokenStore,
   type ApiProduct, type ApiReview,
@@ -66,7 +66,6 @@ function ReviewForm({ productId, onPosted }: { productId: string; onPosted: () =
   return (
     <form onSubmit={handleSubmit} className="border dark:border-gray-700 rounded-2xl p-4 sm:p-5 space-y-3 bg-gray-50 dark:bg-gray-900/50">
       <p className="font-semibold dark:text-white text-sm">Leave a Review</p>
-      {/* Star picker */}
       <div className="flex gap-1">
         {Array.from({ length: 5 }).map((_, i) => (
           <button
@@ -114,40 +113,32 @@ export function ProductDetail() {
   const { addToCart } = useCart();
   const [quantity, setQuantity] = useState(1);
 
-  // Product state
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Related products
   const [related, setRelated] = useState<Product[]>([]);
 
-  // Reviews
   const [reviews, setReviews] = useState<ApiReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [reviewTotal, setReviewTotal] = useState(0);
 
-  // Wishlist
   const [wishlisted, setWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
 
-  // Load product by id
   const loadProduct = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetchProducts({ id });
-      const raw = res as ApiProduct;
+      const raw = await fetchProductById(id);
       const mapped = mapApiProduct(raw);
       setProduct(mapped);
 
-      // load related by same category
       if (raw.category?.slug) {
         const rel = await fetchProducts({ category: raw.category.slug, limit: 5 });
-        const relPaginated = rel as { data: ApiProduct[] };
         setRelated(
-          relPaginated.data
+          rel.data
             .filter((p) => p.id !== id)
             .slice(0, 4)
             .map(mapApiProduct)
@@ -160,7 +151,6 @@ export function ProductDetail() {
     }
   }, [id]);
 
-  // Load reviews
   const loadReviews = useCallback(async () => {
     if (!id) return;
     setReviewsLoading(true);
@@ -202,7 +192,6 @@ export function ProductDetail() {
     }
   };
 
-  // ── Loading state ──
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -214,7 +203,6 @@ export function ProductDetail() {
     );
   }
 
-  // ── Error / not found ──
   if (error || !product) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
@@ -241,7 +229,6 @@ export function ProductDetail() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="container mx-auto px-4 py-6 sm:py-8 max-w-6xl">
 
-        {/* ── Breadcrumb ── */}
         <div className="mb-5">
           <Button variant="ghost" asChild className="text-sm dark:text-gray-300 -ml-2">
             <Link to="/products">
@@ -251,11 +238,9 @@ export function ProductDetail() {
           </Button>
         </div>
 
-        {/* ── Product card ── */}
         <div className="bg-white dark:bg-gray-800 dark:border dark:border-gray-700 rounded-2xl p-5 sm:p-8 mb-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
 
-            {/* Image */}
             <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-700">
               <img
                 src={product.image}
@@ -274,7 +259,6 @@ export function ProductDetail() {
               )}
             </div>
 
-            {/* Info */}
             <div className="flex flex-col">
               {product.brand && (
                 <p className="text-xs font-semibold text-[#3D9B8E] uppercase tracking-widest mb-2">{product.brand}</p>
@@ -283,7 +267,6 @@ export function ProductDetail() {
                 {product.name}
               </h1>
 
-              {/* Rating row */}
               <div className="flex items-center gap-2 mb-4">
                 <StarRow rating={product.rating} size="lg" />
                 <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -291,7 +274,6 @@ export function ProductDetail() {
                 </span>
               </div>
 
-              {/* Price */}
               <div className="border-t dark:border-gray-700 border-b dark:border-b-gray-700 py-4 mb-5">
                 <div className="flex flex-wrap items-baseline gap-2 sm:gap-3">
                   <span className="text-3xl sm:text-4xl font-bold text-[#8B1538]">
@@ -310,13 +292,11 @@ export function ProductDetail() {
                 </div>
               </div>
 
-              {/* Description */}
               <div className="mb-5">
                 <h2 className="font-semibold mb-1.5 dark:text-white text-sm">Description</h2>
                 <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">{product.description}</p>
               </div>
 
-              {/* Quantity */}
               <div className="mb-5">
                 <p className="text-sm font-semibold dark:text-white mb-2">Quantity</p>
                 <div className="flex items-center border dark:border-gray-600 rounded-xl w-fit overflow-hidden">
@@ -338,7 +318,6 @@ export function ProductDetail() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex gap-3 mb-6">
                 <Button
                   onClick={handleAddToCart}
@@ -365,7 +344,6 @@ export function ProductDetail() {
                 </button>
               </div>
 
-              {/* Feature pills */}
               <div className="border-t dark:border-gray-700 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { icon: Truck, title: '10% Cashback', sub: 'On orders over ₦20,000' },
@@ -386,7 +364,6 @@ export function ProductDetail() {
           </div>
         </div>
 
-        {/* ── Reviews section ── */}
         <section className="mb-10">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg sm:text-xl font-bold dark:text-white flex items-center gap-2">
@@ -398,12 +375,10 @@ export function ProductDetail() {
             </h2>
           </div>
 
-          {/* Review form */}
           <div className="mb-5">
             <ReviewForm productId={id!} onPosted={loadReviews} />
           </div>
 
-          {/* Review list */}
           {reviewsLoading ? (
             <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading reviews…
@@ -448,7 +423,6 @@ export function ProductDetail() {
           )}
         </section>
 
-        {/* ── Related Products ── */}
         {related.length > 0 && (
           <section>
             <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Related Products</h2>
