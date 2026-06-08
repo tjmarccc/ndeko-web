@@ -18,14 +18,14 @@ export function ProductCard({ product }: ProductCardProps) {
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
-    e.stopPropagation(); // ✅ prevent Link navigation swallowing the click
+    e.stopPropagation();
     addToCart(product);
     toast.success(`${product.name} added to cart`);
   };
 
   const handleWishlist = (e: React.MouseEvent) => {
     e.preventDefault();
-    e.stopPropagation(); // ✅ prevent Link navigation swallowing the click
+    e.stopPropagation();
     toggleWishlist(product);
     toast.success(wished ? 'Removed from wishlist' : 'Added to wishlist');
   };
@@ -65,9 +65,11 @@ export function ProductCard({ product }: ProductCardProps) {
         <div className="flex items-center gap-2">
           <div className="flex items-baseline gap-2">
             <span className="text-xl font-bold text-[#8B1538]">
-              ₦{product.price.toLocaleString()}
+              {product.price != null
+                ? `₦${product.price.toLocaleString()}`
+                : 'Price unavailable'}
             </span>
-            {product.originalPrice && (
+            {product.originalPrice != null && (
               <span className="text-sm text-gray-500 line-through">
                 ₦{product.originalPrice.toLocaleString()}
               </span>
@@ -80,15 +82,14 @@ export function ProductCard({ product }: ProductCardProps) {
             <Star
               key={i}
               className={`h-4 w-4 ${
-                i < Math.floor(product.rating)
+                i < Math.floor(product.rating ?? 0)
                   ? 'fill-[#3D9B8E] text-[#3D9B8E]'
                   : 'fill-gray-200 text-gray-200 dark:fill-gray-600 dark:text-gray-600'
               }`}
             />
           ))}
-          {/* ✅ Fixed: was product.reviewCount (doesn't exist), now product.reviews */}
           <span className="text-sm text-gray-600 dark:text-gray-400 ml-1">
-            ({product.reviews})
+            ({product.reviews ?? 0})
           </span>
         </div>
 
@@ -96,6 +97,7 @@ export function ProductCard({ product }: ProductCardProps) {
           onClick={handleAddToCart}
           className="w-full bg-[#8B1538] hover:bg-[#6B0F2A]"
           size="sm"
+          disabled={product.price == null}
         >
           <ShoppingCart className="h-4 w-4 mr-2" />
           Add to Cart
