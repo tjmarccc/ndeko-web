@@ -1,11 +1,9 @@
 import type { Product } from '../types/product';
 
-const BASE_URL = ' https://ndeko-backend-dev.onrender.com';
+const BASE_URL = 'https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
-// ─── Token storage ────────────────────────────────────────────────────────────
-// Access token in memory only — not reachable by XSS.
-// Refresh token in localStorage (HttpOnly cookie would need backend support).
+
 
 let _accessToken: string | null = null;
 
