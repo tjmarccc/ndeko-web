@@ -116,7 +116,7 @@ export function OrderConfirmation() {
               <div className="col-span-2 sm:col-span-1 bg-white dark:bg-gray-900/60 rounded-xl p-3 border dark:border-gray-700">
                 <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">Order Total</p>
                 <p className="font-bold text-[#8B1538] text-base">
-                  ₦{order.total_amount.toLocaleString()}
+                  ₦{(order.total_amount ?? 0).toLocaleString()}
                 </p>
               </div>
               {/* Payment status */}
@@ -132,7 +132,7 @@ export function OrderConfirmation() {
                 <div className="flex items-center gap-1.5">
                   <CreditCard className="h-3.5 w-3.5 text-[#8B1538]" />
                   <p className="text-xs font-semibold dark:text-white">
-                    {paymentLabel(order.payment_method)}
+                    {paymentLabel(order.payment_method ?? '')}
                   </p>
                 </div>
               </div>

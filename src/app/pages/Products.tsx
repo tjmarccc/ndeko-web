@@ -104,21 +104,21 @@ export function Products() {
 
           // Client-side price filter (API may not support range filter)
           const priceFiltered = mapped.filter(
-            (p) => p.price >= priceRange[0] && p.price <= priceRange[1]
+            (p) => (p.price ?? 0) >= priceRange[0] && (p.price ?? 0) <= priceRange[1]
           );
 
           // Client-side search filter
           const searched = searchQuery
             ? priceFiltered.filter(
                 (p) =>
-                  p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  (p.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                   (p.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                   (p.brand ?? '').toLowerCase().includes(searchQuery.toLowerCase())
               )
             : priceFiltered;
 
           setProducts((prev) => (append ? [...prev, ...searched] : searched));
-          setTotalProducts(res.total);
+          setTotalProducts(res.total ?? 0);
           setCurrentPage(page);
         } else {
           // Single product response
@@ -152,8 +152,8 @@ export function Products() {
   const sortedProducts = useMemo(() => {
     const copy = [...products];
     switch (sortBy) {
-      case 'price-low': return copy.sort((a, b) => a.price - b.price);
-      case 'price-high': return copy.sort((a, b) => b.price - a.price);
+      case 'price-low': return copy.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+      case 'price-high': return copy.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
       case 'rating': return copy.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
       case 'discount': return copy.sort((a, b) => (b.discount ?? 0) - (a.discount ?? 0));
       default: return copy;
@@ -263,8 +263,8 @@ export function Products() {
           className="mb-3"
         />
         <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300">
-          <span>₦{priceRange[0].toLocaleString()}</span>
-          <span>₦{priceRange[1].toLocaleString()}</span>
+          <span>₦{(priceRange[0] ?? 0).toLocaleString()}</span>
+          <span>₦{(priceRange[1] ?? MAX_PRICE).toLocaleString()}</span>
         </div>
       </div>
 
@@ -363,7 +363,7 @@ export function Products() {
                       : 'All Products'}
                   </h1>
                   <p className="text-gray-500 dark:text-gray-400 text-xs">
-                    {loading ? 'Loading…' : `${totalProducts.toLocaleString()} products found`}
+                    {loading ? 'Loading…' : `${(totalProducts ?? 0).toLocaleString()} products found`}
                   </p>
                 </div>
               </div>
@@ -449,7 +449,7 @@ export function Products() {
             {/* End of results */}
             {!loading && !hasMore && sortedProducts.length > 0 && (
               <p className="text-center text-gray-400 dark:text-gray-600 text-xs py-6">
-                You've seen all {totalProducts.toLocaleString()} products
+                You've seen all {(totalProducts ?? 0).toLocaleString()} products
               </p>
             )}
           </div>

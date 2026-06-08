@@ -21,13 +21,14 @@ import type { Product } from '../types/product';
 
 function StarRow({ rating, size = 'sm' }: { rating: number; size?: 'sm' | 'lg' }) {
   const cls = size === 'lg' ? 'h-5 w-5' : 'h-4 w-4';
+  const safeRating = rating ?? 0;
   return (
     <div className="flex items-center gap-0.5">
       {Array.from({ length: 5 }).map((_, i) => (
         <Star
           key={i}
           className={`${cls} ${
-            i < Math.floor(rating)
+            i < Math.floor(safeRating)
               ? 'fill-[#3D9B8E] text-[#3D9B8E]'
               : 'fill-gray-200 text-gray-200 dark:fill-gray-600 dark:text-gray-600'
           }`}
@@ -157,7 +158,7 @@ export function ProductDetail() {
     try {
       const res = await fetchProductReviews(id, 1, 10);
       setReviews(res.data);
-      setReviewTotal(res.total);
+      setReviewTotal(res.total ?? 0);
     } catch {}
     finally { setReviewsLoading(false); }
   }, [id]);
@@ -270,22 +271,22 @@ export function ProductDetail() {
               <div className="flex items-center gap-2 mb-4">
                 <StarRow rating={product.rating} size="lg" />
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {product.rating.toFixed(1)} ({product.reviews} review{product.reviews !== 1 ? 's' : ''})
+                  {(product.rating ?? 0).toFixed(1)} ({product.reviews ?? 0} review{(product.reviews ?? 0) !== 1 ? 's' : ''})
                 </span>
               </div>
 
               <div className="border-t dark:border-gray-700 border-b dark:border-b-gray-700 py-4 mb-5">
                 <div className="flex flex-wrap items-baseline gap-2 sm:gap-3">
                   <span className="text-3xl sm:text-4xl font-bold text-[#8B1538]">
-                    ₦{product.price.toLocaleString()}
+                    ₦{(product.price ?? 0).toLocaleString()}
                   </span>
                   {product.originalPrice && (
                     <>
                       <span className="text-lg sm:text-xl text-gray-400 line-through">
-                        ₦{product.originalPrice.toLocaleString()}
+                        ₦{(product.originalPrice ?? 0).toLocaleString()}
                       </span>
                       <Badge className="bg-[#3D9B8E] hover:bg-[#2F7C72] text-xs">
-                        Save ₦{(product.originalPrice - product.price).toLocaleString()}
+                        Save ₦{((product.originalPrice ?? 0) - (product.price ?? 0)).toLocaleString()}
                       </Badge>
                     </>
                   )}
@@ -411,7 +412,7 @@ export function ProductDetail() {
                           {new Date(r.created_at).toLocaleDateString('en-NG', { year: 'numeric', month: 'short', day: 'numeric' })}
                         </span>
                       </div>
-                      <StarRow rating={r.rating} />
+                      <StarRow rating={r.rating ?? 0} />
                       {r.comment && (
                         <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 leading-relaxed">{r.comment}</p>
                       )}

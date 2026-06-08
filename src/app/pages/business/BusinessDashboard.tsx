@@ -151,9 +151,10 @@ const getStoreProducts = (storeId: string, page = 1, limit = 100) =>
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number): string {
-  if (n >= 1_000_000) return `₦${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `₦${(n / 1_000).toFixed(1)}K`;
-  return `₦${n.toLocaleString()}`;
+  const safe = n ?? 0;
+  if (safe >= 1_000_000) return `₦${(safe / 1_000_000).toFixed(2)}M`;
+  if (safe >= 1_000) return `₦${(safe / 1_000).toFixed(1)}K`;
+  return `₦${safe.toLocaleString()}`;
 }
 
 function fmtDate(iso: string): string {
@@ -168,7 +169,7 @@ function buildRevenueChart(
   if (revByDay && revByDay.length > 0) {
     return revByDay.slice(-7).map(d => ({
       day: new Date(d.date).toLocaleDateString('en-NG', { weekday: 'short' }),
-      revenue: d.revenue,
+      revenue: d.revenue ?? 0,
     }));
   }
   // Fallback: bucket recent orders by day
@@ -181,7 +182,7 @@ function buildRevenueChart(
   }
   (orders ?? []).forEach(o => {
     const key = new Date(o.created_at).toDateString();
-    if (key in days) days[key] = (days[key] ?? 0) + o.total_amount;
+    if (key in days) days[key] = (days[key] ?? 0) + (o.total_amount ?? 0);
   });
   return Object.entries(days).map(([d, revenue]) => ({
     day: new Date(d).toLocaleDateString('en-NG', { weekday: 'short' }),
@@ -330,10 +331,10 @@ export function BusinessDashboard() {
 
   // ── Derived values ──────────────────────────────────────────────────────────
 
-  const revenue = (dashboard?.total_revenue ?? dashboard?.revenue ?? 0) as number;
-  const ordersCount = (dashboard?.total_orders ?? dashboard?.orders_count ?? 0) as number;
-  const activeProducts = (dashboard?.total_products ?? dashboard?.active_products ?? allProducts.filter(p => p.stock_status !== 'out_of_stock').length) as number;
-  const visitors = (dashboard?.visitors ?? dashboard?.visitor_count ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0) as number;
+  const revenue = ((dashboard?.total_revenue ?? dashboard?.revenue ?? 0) as number);
+  const ordersCount = ((dashboard?.total_orders ?? dashboard?.orders_count ?? 0) as number);
+  const activeProducts = ((dashboard?.total_products ?? dashboard?.active_products ?? allProducts.filter(p => p.stock_status !== 'out_of_stock').length) as number);
+  const visitors = ((dashboard?.visitors ?? dashboard?.visitor_count ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0) as number);
 
   const lowStock = allProducts.filter(p => p.stock_status === 'low_stock').length;
   const outOfStock = allProducts.filter(p => p.stock_status === 'out_of_stock').length;
@@ -350,7 +351,7 @@ export function BusinessDashboard() {
   );
 
   // Max sold for % bar scaling
-  const maxSold = Math.max(...topProducts.map(p => p.review_count ?? 1), 1);
+  const maxSold = Math.max(...topProducts.map(p => p.stock_quantity ?? 1), 1);
 
   return (
     <>
@@ -660,9 +661,9 @@ export function BusinessDashboard() {
         {/* Stat cards */}
         <div className="db-stats-grid">
           <StatCard icon={TrendingUp} label="Revenue (30 days)" value={loading ? '—' : fmt(revenue)} color="#8B1538" loading={loading} />
-          <StatCard icon={ShoppingBag} label="Orders (30 days)" value={loading ? '—' : ordersCount.toString()} color="#3D9B8E" loading={loading} />
-          <StatCard icon={Package} label="Active Products" value={loading ? '—' : activeProducts.toString()} color="#D4828F" loading={loading} />
-          <StatCard icon={Eye} label="Store Visitors" value={loading ? '—' : visitors.toLocaleString()} color="#6366F1" loading={loading} />
+          <StatCard icon={ShoppingBag} label="Orders (30 days)" value={loading ? '—' : (ordersCount ?? 0).toString()} color="#3D9B8E" loading={loading} />
+          <StatCard icon={Package} label="Active Products" value={loading ? '—' : (activeProducts ?? 0).toString()} color="#D4828F" loading={loading} />
+          <StatCard icon={Eye} label="Store Visitors" value={loading ? '—' : (visitors ?? 0).toLocaleString()} color="#6366F1" loading={loading} />
         </div>
 
         {/* Chart + side panel */}
@@ -691,9 +692,9 @@ export function BusinessDashboard() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} tickFormatter={v => `₦${(v / 1000).toFixed(0)}k`} width={44} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} tickFormatter={v => `₦${((v ?? 0) / 1000).toFixed(0)}k`} width={44} />
                   <Tooltip
-                    formatter={(v: number) => [`₦${v.toLocaleString()}`, 'Revenue']}
+                    formatter={(v: number) => [`₦${(v ?? 0).toLocaleString()}`, 'Revenue']}
                     contentStyle={{ borderRadius: 12, border: '1px solid #F3F4F6', boxShadow: '0 4px 20px rgba(0,0,0,.08)', fontSize: 12 }}
                   />
                   <Area type="monotone" dataKey="revenue" stroke="#8B1538" strokeWidth={2.5} fill="url(#dbRevGrad)" dot={{ fill: '#8B1538', r: 3 }} />
@@ -724,10 +725,10 @@ export function BusinessDashboard() {
                         onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/30?text=?'; }}
                       />
                       <span className="db-top-product__name">{p.name}</span>
-                      <span className="db-top-product__price">{fmt(p.price)}</span>
+                      <span className="db-top-product__price">{fmt(p.price ?? 0)}</span>
                     </div>
                     <div className="db-bar-track">
-                      <div className="db-bar-fill" style={{ width: `${Math.round(((p.stock_quantity ?? 0) / Math.max(...topProducts.map(x => x.stock_quantity ?? 1), 1)) * 100)}%` }} />
+                      <div className="db-bar-fill" style={{ width: `${Math.round(((p.stock_quantity ?? 0) / maxSold) * 100)}%` }} />
                     </div>
                   </div>
                 ))
@@ -800,7 +801,7 @@ export function BusinessDashboard() {
                           </span>
                         </td>
                         <td style={{ fontWeight: 700, color: 'var(--gray-800)' }}>
-                          ₦{o.total_amount.toLocaleString()}
+                          ₦{(o.total_amount ?? 0).toLocaleString()}
                         </td>
                         <td>
                           <span style={{
@@ -828,7 +829,7 @@ export function BusinessDashboard() {
                       <div className="db-order-mobile-card__date">{fmtDate(o.created_at)}</div>
                     </div>
                     <div className="db-order-mobile-card__right">
-                      <div className="db-order-mobile-card__amount">₦{o.total_amount.toLocaleString()}</div>
+                      <div className="db-order-mobile-card__amount">₦{(o.total_amount ?? 0).toLocaleString()}</div>
                       <OrderStatusBadge status={o.status} />
                     </div>
                   </div>

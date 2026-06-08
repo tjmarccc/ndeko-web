@@ -142,15 +142,16 @@ const fetchCategories = (params?: { page?: number; limit?: number }) => {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StockBadge({ status, qty }: { status: string; qty: number }) {
-  if (status === 'out_of_stock' || qty === 0)
+  const safeQty = qty ?? 0;
+  if (status === 'out_of_stock' || safeQty === 0)
     return <span className="inv-badge inv-badge--out">Out of Stock</span>;
-  if (status === 'low_stock' || qty <= 5)
+  if (status === 'low_stock' || safeQty <= 5)
     return (
       <span className="inv-badge inv-badge--low">
-        <AlertTriangle style={{ width: 11, height: 11 }} /> Low ({qty})
+        <AlertTriangle style={{ width: 11, height: 11 }} /> Low ({safeQty})
       </span>
     );
-  return <span className="inv-badge inv-badge--ok">{qty} in stock</span>;
+  return <span className="inv-badge inv-badge--ok">{safeQty} in stock</span>;
 }
 
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
@@ -347,8 +348,8 @@ export function BusinessInventory() {
   // Client-side filter
   const filtered = products.filter(p => {
     const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase());
+      (p.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku ?? '').toLowerCase().includes(search.toLowerCase());
     const matchCat = catFilter === 'all' || p.category?.id === catFilter || p.category?.slug === catFilter;
     const matchStatus =
       statusFilter === 'all' ||
@@ -360,7 +361,7 @@ export function BusinessInventory() {
   });
 
   // Stats
-  const totalValue = products.reduce((s, p) => s + p.price * p.stock_quantity, 0);
+  const totalValue = products.reduce((s, p) => s + (p.price ?? 0) * (p.stock_quantity ?? 0), 0);
   const lowStockCount = products.filter(p => p.stock_status === 'low_stock').length;
   const outOfStockCount = products.filter(p => p.stock_status === 'out_of_stock').length;
 
@@ -388,7 +389,7 @@ export function BusinessInventory() {
     showToast(modal?.mode === 'add' ? 'Product added!' : 'Product updated!', 'success');
   };
 
-  const totalPages = Math.ceil(total / LIMIT);
+  const totalPages = Math.ceil((total ?? 0) / LIMIT);
 
   return (
     <>
@@ -755,14 +756,14 @@ export function BusinessInventory() {
         {/* Stats */}
         <div className="inv-stats">
           {[
-            { icon: Package, label: 'Total Products', value: total.toString(), color: '#8B1538' },
+            { icon: Package, label: 'Total Products', value: (total ?? 0).toString(), color: '#8B1538' },
             { icon: AlertTriangle, label: 'Low Stock', value: lowStockCount.toString(), color: '#D97706' },
             { icon: Package, label: 'Out of Stock', value: outOfStockCount.toString(), color: '#DC2626' },
             {
               icon: DollarSign, label: 'Inventory Value',
               value: totalValue >= 1_000_000
                 ? `₦${(totalValue / 1_000_000).toFixed(1)}M`
-                : `₦${(totalValue / 1000).toFixed(0)}K`,
+                : `₦${((totalValue ?? 0) / 1000).toFixed(0)}K`,
               color: '#3D9B8E',
             },
           ].map(s => (
@@ -879,8 +880,8 @@ export function BusinessInventory() {
                             {p.category?.name ?? '—'}
                           </span>
                         </td>
-                        <td style={{ fontWeight: 700, color: '#1F2937' }}>₦{p.price.toLocaleString()}</td>
-                        <td><StockBadge status={p.stock_status} qty={p.stock_quantity} /></td>
+                        <td style={{ fontWeight: 700, color: '#1F2937' }}>₦{(p.price ?? 0).toLocaleString()}</td>
+                        <td><StockBadge status={p.stock_status} qty={p.stock_quantity ?? 0} /></td>
                         <td>
                           <span className={`inv-badge ${p.is_active ? 'inv-badge--active' : 'inv-badge--inactive'}`}>
                             {p.is_active ? 'Active' : 'Inactive'}
@@ -941,7 +942,7 @@ export function BusinessInventory() {
                     <div className="inv-mobile-card__info">
                       <div className="inv-mobile-card__name">{p.name}</div>
                       <div className="inv-mobile-card__meta">
-                        ₦{p.price.toLocaleString()} · <StockBadge status={p.stock_status} qty={p.stock_quantity} />
+                        ₦{(p.price ?? 0).toLocaleString()} · <StockBadge status={p.stock_status} qty={p.stock_quantity ?? 0} />
                       </div>
                     </div>
                     <div className="inv-mobile-card__actions">
