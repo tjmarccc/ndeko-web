@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Outlet } from 'react-router';
 import { Layout } from './components/Layout';
 import { BusinessLayout } from './components/BusinessLayout';
 import { Home } from './pages/Home';
@@ -22,18 +22,64 @@ import { BusinessStorefront } from './pages/business/BusinessStorefront';
 import { BusinessAnalytics } from './pages/business/BusinessAnalytics';
 import { BusinessSettings } from './pages/business/BusinessSettings';
 import { BusinessNotifications } from './pages/business/BusinessNotifications';
+import { AuthProvider } from './contexts/AuthContext';
+import { CartProvider } from './contexts/CartContext';
+import { WishlistProvider } from './contexts/WishlistContext';
+
+// ── Shared provider wrapper used by every layout tree ─────────────────────────
+// AuthProvider needs useNavigate(), which only works inside the router tree.
+// Wrapping here (inside a route element) satisfies that requirement.
+function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthProvider>
+      <CartProvider>
+        <WishlistProvider>
+          {children}
+        </WishlistProvider>
+      </CartProvider>
+    </AuthProvider>
+  );
+}
+
+// ── Per-tree root layouts ─────────────────────────────────────────────────────
+// Each layout tree gets its own Providers wrapper so all three trees
+// (login, business, buyer) have access to auth/cart/wishlist context.
+
+function LoginRoot() {
+  return (
+    <Providers>
+      <Login />
+    </Providers>
+  );
+}
+
+function BusinessRoot() {
+  return (
+    <Providers>
+      <BusinessLayout />
+    </Providers>
+  );
+}
+
+function BuyerRoot() {
+  return (
+    <Providers>
+      <Layout />
+    </Providers>
+  );
+}
 
 export const router = createBrowserRouter([
   // Login — standalone (no buyer header/footer)
   {
     path: '/login',
-    Component: Login,
+    Component: LoginRoot,
   },
 
   // Business portal — own layout
   {
     path: '/business',
-    Component: BusinessLayout,
+    Component: BusinessRoot,
     children: [
       { index: true, Component: BusinessDashboard },
       { path: 'inventory', Component: BusinessInventory },
@@ -49,7 +95,7 @@ export const router = createBrowserRouter([
   // Buyer store — main layout
   {
     path: '/',
-    Component: Layout,
+    Component: BuyerRoot,
     children: [
       { index: true, Component: Home },
       { path: 'products', Component: Products },
