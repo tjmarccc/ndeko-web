@@ -1,9 +1,8 @@
 import type { Product } from '../types/product';
 
-const BASE_URL = 'https://ndeko-backend-dev.onrender.com';
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://ndeko-backend-prod.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
-
-
 
 let _accessToken: string | null = null;
 
@@ -31,17 +30,10 @@ export const tokenStore = {
   },
 };
 
-// ─── Session-expired event ────────────────────────────────────────────────────
-// Fires a CustomEvent instead of doing window.location.href = '/login'.
-// The router/auth context listens and calls navigate('/login') itself,
-// keeping this file environment-agnostic (no hard reload, works in RN/SSR/tests).
-
 export const SESSION_EXPIRED_EVENT = 'ndeko:session_expired';
 function dispatchSessionExpired() {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 }
-
-// ─── Structured error ─────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   constructor(
@@ -54,8 +46,6 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 }
-
-// ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -157,7 +147,6 @@ export interface CheckoutBody {
   promo_code?: string;
 }
 
-// Proper types replacing Record<string, unknown>
 export interface Wallet {
   id: string;
   balance: number;
@@ -212,9 +201,6 @@ export interface KycSubmission {
   created_at: string;
 }
 
-// ─── Central query builder ────────────────────────────────────────────────────
-// Replaces the repeated URLSearchParams blocks that were scattered everywhere.
-
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
   const q = new URLSearchParams();
@@ -226,11 +212,6 @@ function buildQuery(params?: Record<string, unknown>): string {
   const str = q.toString();
   return str ? `?${str}` : '';
 }
-
-// ─── Refresh-token singleton ──────────────────────────────────────────────────
-// If 10 requests fail with 401 at the same time, only ONE refresh call is made.
-// All callers await the same promise, preventing race conditions and token
-// invalidation from multiple simultaneous refresh attempts.
 
 let _refreshPromise: Promise<AuthTokens> | null = null;
 
@@ -250,9 +231,6 @@ async function doRefresh(): Promise<AuthTokens> {
 
   return _refreshPromise;
 }
-
-// ─── Core fetch with 15s timeout ─────────────────────────────────────────────
-// Prevents requests hanging forever when the Render server is cold-starting.
 
 async function coreFetch(url: string, options: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -274,9 +252,6 @@ async function coreFetch(url: string, options: RequestInit): Promise<Response> {
   }
 }
 
-// ─── Safe response parser (handles 204 No Content) ────────────────────────────
-// res.json() throws on empty body — this reads text first.
-
 async function parseResponse(res: Response): Promise<unknown> {
   const text = await res.text();
   if (!text) return null;
@@ -286,9 +261,6 @@ async function parseResponse(res: Response): Promise<unknown> {
     return null;
   }
 }
-
-// ─── Header builder ───────────────────────────────────────────────────────────
-// Skips Content-Type for FormData so the browser sets the multipart boundary.
 
 function buildHeaders(
   extra: Record<string, string> = {},
@@ -303,8 +275,6 @@ function buildHeaders(
   return headers;
 }
 
-// ─── Public fetch ─────────────────────────────────────────────────────────────
-
 async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = buildHeaders(options.headers as Record<string, string>, options.body);
   const res = await coreFetch(`${BASE_URL}${path}`, { ...options, headers });
@@ -318,8 +288,6 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
   return json as T;
 }
 
-// ─── Authenticated fetch ──────────────────────────────────────────────────────
-
 async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const token = tokenStore.getAccess();
   const headers = buildHeaders(options.headers as Record<string, string>, options.body, token);
@@ -330,10 +298,8 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
       const tokens = await doRefresh();
       tokenStore.setAccess(tokens.access_token);
       if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
-      return authFetch<T>(path, options, false); // one retry only
+      return authFetch<T>(path, options, false);
     } catch (refreshErr) {
-      // Only log out if refresh itself returned 401 (real expiry).
-      // For 500/502/503 during refresh, preserve tokens — backend may be briefly down.
       if (refreshErr instanceof ApiError && refreshErr.status === 401) {
         tokenStore.clear();
         dispatchSessionExpired();
@@ -399,8 +365,25 @@ export const fetchCategories = (params?: { search?: string; parent_id?: string; 
 export const fetchProducts = (params?: { page?: number; limit?: number; category?: string }) =>
   publicFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products${buildQuery(params)}`);
 
-export const fetchProductById = (id: string) =>
-  publicFetch<ApiProduct>(`/api/v1/products?id=${encodeURIComponent(id)}`);
+// CHANGE 2: fetchProductById previously returned whatever the API gave back
+// (which is a PaginatedResponse wrapper, not a bare ApiProduct). ProductDetail.tsx
+// calls mapApiProduct() directly on the result, so it would silently get
+// undefined for every field (images, name, price, etc.) — causing the missing
+// product details AND missing related products section.
+// Fix: unwrap the paginated envelope and return the first item.
+export const fetchProductById = async (id: string): Promise<ApiProduct> => {
+  const res = await publicFetch<PaginatedResponse<ApiProduct> | ApiProduct>(
+    `/api/v1/products?id=${encodeURIComponent(id)}`
+  );
+  // API returns { data: [...], total, page, limit } even for a single-product ?id= query
+  if (res && typeof res === 'object' && 'data' in res && Array.isArray((res as PaginatedResponse<ApiProduct>).data)) {
+    const item = (res as PaginatedResponse<ApiProduct>).data[0];
+    if (!item) throw new ApiError('Product not found', 404);
+    return item;
+  }
+  // Fallback: API returned a bare object (future-proofing)
+  return res as ApiProduct;
+};
 
 // ─── Reviews ──────────────────────────────────────────────────────────────────
 

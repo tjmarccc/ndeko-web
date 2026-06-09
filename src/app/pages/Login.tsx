@@ -15,7 +15,13 @@ export function Login() {
   const [role, setRole] = useState<'buyer' | 'business'>(initialRole);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [showPass, setShowPass] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: '', businessName: '' });
+  const [form, setForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    businessName: '',
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingVerification, setPendingVerification] = useState(false);
@@ -29,8 +35,10 @@ export function Login() {
         await login(form.email, form.password);
         navigate(role === 'business' ? '/business' : '/');
       } else {
+        // Combine first + last name into the single `name` field the API expects
+        const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
         const params: Parameters<typeof register>[0] = {
-          name: form.name,
+          name: fullName,
           email: form.email,
           password: form.password,
           role: role === 'business' ? 'SELLER' : 'BUYER',
@@ -47,6 +55,11 @@ export function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const setField = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
+    if (key === 'email' || key === 'password') setError(null);
   };
 
   const buyerPerks = [
@@ -74,6 +87,7 @@ export function Login() {
           transition: 'background 0.8s ease',
         }}
       >
+        {/* Decorative blobs */}
         <div className="absolute inset-0 pointer-events-none">
           <div
             className="absolute top-[-60px] left-[-60px] w-64 h-64 rounded-full opacity-20"
@@ -102,25 +116,16 @@ export function Login() {
         <div className="relative z-10">
           <div
             className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-6 text-xs font-semibold text-white/80"
-            style={{
-              background: 'rgba(255,255,255,0.12)',
-              border: '1px solid rgba(255,255,255,0.2)',
-            }}
+            style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)' }}
           >
             {role === 'business' ? '🏪 BUSINESS PORTAL' : '🛍️ BUYER PORTAL'}
           </div>
 
           <h2
             className="text-white mb-4 whitespace-pre-line"
-            style={{
-              fontSize: 'clamp(1.8rem, 3.5vw, 2.6rem)',
-              fontWeight: 800,
-              lineHeight: 1.15,
-            }}
+            style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.6rem)', fontWeight: 800, lineHeight: 1.15 }}
           >
-            {role === 'business'
-              ? 'Grow Your\nBusiness with Ndeko'
-              : 'Shop Smarter,\nSave Bigger'}
+            {role === 'business' ? 'Grow Your\nBusiness with Ndeko' : 'Shop Smarter,\nSave Bigger'}
           </h2>
 
           <p className="text-white/65 mb-8 text-sm" style={{ maxWidth: 340 }}>
@@ -151,14 +156,9 @@ export function Login() {
 
       {/* ── Right form panel ── */}
       <div className="flex-1 flex items-start lg:items-center justify-center bg-gray-50 dark:bg-gray-950 overflow-y-auto">
-        {/*
-          On mobile: py-8 gives breathing room top/bottom and allows the
-          page to scroll naturally when the signup form is tall.
-          On desktop: p-12 with items-center vertically centres it.
-        */}
-        <div className="w-full max-w-[420px] px-5 sm:px-8 py-8 lg:py-12">
+        <div className="w-full max-w-[440px] px-5 sm:px-8 py-8 lg:py-12">
 
-          {/* Mobile-only header strip with gradient */}
+          {/* Mobile-only header strip */}
           <div
             className="lg:hidden -mx-5 sm:-mx-8 -mt-8 mb-6 px-5 sm:px-8 pt-8 pb-6 relative overflow-hidden"
             style={{
@@ -214,7 +214,7 @@ export function Login() {
             <p className="text-gray-500 dark:text-gray-400 text-sm">
               {mode === 'login'
                 ? `Sign in to your ${role === 'business' ? 'business dashboard' : 'shopping account'}`
-                : `Join Ndeko as a ${role === 'business' ? 'vendor/business' : 'buyer'}`}
+                : `Join Ndeko as a ${role === 'business' ? 'vendor / business' : 'buyer'}`}
             </p>
           </div>
 
@@ -236,25 +236,44 @@ export function Login() {
             </div>
           )}
 
-          {/* Form */}
+          {/* ── Form ── */}
           <form onSubmit={handleSubmit} className="space-y-4">
+
+            {/* First name + Last name (signup only) */}
             {mode === 'signup' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Your full name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
-                  required
-                  autoComplete="name"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    First Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="First name"
+                    value={form.firstName}
+                    onChange={setField('firstName')}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
+                    required
+                    autoComplete="given-name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Last name"
+                    value={form.lastName}
+                    onChange={setField('lastName')}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
+                    required
+                    autoComplete="family-name"
+                  />
+                </div>
               </div>
             )}
 
+            {/* Business name (signup + business only) */}
             {mode === 'signup' && role === 'business' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
@@ -264,13 +283,14 @@ export function Login() {
                   type="text"
                   placeholder="Your store / business name"
                   value={form.businessName}
-                  onChange={(e) => setForm({ ...form, businessName: e.target.value })}
+                  onChange={setField('businessName')}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
                   autoComplete="organization"
                 />
               </div>
             )}
 
+            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                 Email Address
@@ -279,7 +299,7 @@ export function Login() {
                 type="email"
                 placeholder="you@example.com"
                 value={form.email}
-                onChange={(e) => { setForm({ ...form, email: e.target.value }); setError(null); }}
+                onChange={setField('email')}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
                 required
                 autoComplete="email"
@@ -287,16 +307,14 @@ export function Login() {
               />
             </div>
 
+            {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Password
                 </label>
                 {mode === 'login' && (
-                  <Link
-                    to="/forgot-password"
-                    className="text-xs text-[#8B1538] hover:underline"
-                  >
+                  <Link to="/forgot-password" className="text-xs text-[#8B1538] hover:underline">
                     Forgot password?
                   </Link>
                 )}
@@ -306,7 +324,7 @@ export function Login() {
                   type={showPass ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={form.password}
-                  onChange={(e) => { setForm({ ...form, password: e.target.value }); setError(null); }}
+                  onChange={setField('password')}
                   className="w-full px-4 py-3 pr-11 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-[#8B1538]/30 focus:border-[#8B1538] transition-all"
                   required
                   minLength={mode === 'signup' ? 8 : undefined}
@@ -318,13 +336,17 @@ export function Login() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
                   aria-label={showPass ? 'Hide password' : 'Show password'}
                 >
-                  {showPass
-                    ? <EyeOff className="h-4 w-4" />
-                    : <Eye className="h-4 w-4" />}
+                  {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {mode === 'signup' && (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Minimum 8 characters
+                </p>
+              )}
             </div>
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading}

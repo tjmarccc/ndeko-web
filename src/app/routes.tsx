@@ -1,4 +1,5 @@
-import { createBrowserRouter, Outlet } from 'react-router';
+import { createBrowserRouter, useLocation } from 'react-router';
+import { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { BusinessLayout } from './components/BusinessLayout';
 import { Home } from './pages/Home';
@@ -26,9 +27,15 @@ import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 
-// ── Shared provider wrapper used by every layout tree ─────────────────────────
-// AuthProvider needs useNavigate(), which only works inside the router tree.
-// Wrapping here (inside a route element) satisfies that requirement.
+// ── Scroll to top on every route change ───────────────────────────────────────
+function useScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+}
+
+// ── Shared providers ──────────────────────────────────────────────────────────
 function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
@@ -41,11 +48,9 @@ function Providers({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Per-tree root layouts ─────────────────────────────────────────────────────
-// Each layout tree gets its own Providers wrapper so all three trees
-// (login, business, buyer) have access to auth/cart/wishlist context.
-
+// ── Root layouts (each calls useScrollToTop) ──────────────────────────────────
 function LoginRoot() {
+  useScrollToTop();
   return (
     <Providers>
       <Login />
@@ -54,6 +59,7 @@ function LoginRoot() {
 }
 
 function BusinessRoot() {
+  useScrollToTop();
   return (
     <Providers>
       <BusinessLayout />
@@ -62,6 +68,7 @@ function BusinessRoot() {
 }
 
 function BuyerRoot() {
+  useScrollToTop();
   return (
     <Providers>
       <Layout />
@@ -69,14 +76,13 @@ function BuyerRoot() {
   );
 }
 
+// ── Router ────────────────────────────────────────────────────────────────────
 export const router = createBrowserRouter([
-  // Login — standalone (no buyer header/footer)
   {
     path: '/login',
     Component: LoginRoot,
   },
 
-  // Business portal — own layout
   {
     path: '/business',
     Component: BusinessRoot,
@@ -92,7 +98,6 @@ export const router = createBrowserRouter([
     ],
   },
 
-  // Buyer store — main layout
   {
     path: '/',
     Component: BuyerRoot,

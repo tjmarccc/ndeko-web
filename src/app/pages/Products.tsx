@@ -21,6 +21,19 @@ import type { Product } from '../types/product';
 const PAGE_SIZE = 20;
 const MAX_PRICE = 3_000_000; // naira
 
+// ─── Debounce hook ────────────────────────────────────────────────────────────
+// Returns a value that only updates after `delay` ms of no changes.
+// Used for the price slider so the API isn't called on every drag tick.
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 // ─── Skeleton card ────────────────────────────────────────────────────────────
 
 function SkeletonCard() {
@@ -45,10 +58,14 @@ export function Products() {
 
   // ── Filter / sort state ──
   const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam || 'all');
+  // priceRange is the live slider position (updates every tick for smooth UI)
   const [priceRange, setPriceRange] = useState([0, MAX_PRICE]);
   const [sortBy, setSortBy] = useState('featured');
   const [filterOpen, setFilterOpen] = useState(true);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+
+  // ── Debounced price — only triggers API refetch after 400ms of no slider movement ──
+  const debouncedPrice = useDebounce(priceRange, 400);
 
   // ── Data state ──
   const [products, setProducts] = useState<Product[]>([]);
@@ -80,9 +97,10 @@ export function Products() {
   }, []);
 
   // ── Fetch products ──
+  // NOTE: depends on `debouncedPrice`, NOT `priceRange`, so the API only
+  // fires after the user has stopped dragging the slider.
   const loadProducts = useCallback(
     async (page: number, append = false) => {
-      // Cancel previous request
       abortRef.current?.abort();
       abortRef.current = new AbortController();
 
@@ -98,13 +116,12 @@ export function Products() {
 
         const res = await fetchProducts(params);
 
-        // API can return single product or paginated list
         if ('data' in res) {
           const mapped = res.data.map(mapApiProduct);
 
-          // Client-side price filter (API may not support range filter)
+          // Client-side price filter using the debounced value
           const priceFiltered = mapped.filter(
-            (p) => (p.price ?? 0) >= priceRange[0] && (p.price ?? 0) <= priceRange[1]
+            (p) => (p.price ?? 0) >= debouncedPrice[0] && (p.price ?? 0) <= debouncedPrice[1]
           );
 
           // Client-side search filter
@@ -121,7 +138,6 @@ export function Products() {
           setTotalProducts(res.total ?? 0);
           setCurrentPage(page);
         } else {
-          // Single product response
           const mapped = mapApiProduct(res as ApiProduct);
           setProducts([mapped]);
           setTotalProducts(1);
@@ -134,7 +150,8 @@ export function Products() {
         setLoadingMore(false);
       }
     },
-    [selectedCategory, priceRange, searchQuery]
+    // debouncedPrice here (not priceRange) — prevents re-fetch on every slider tick
+    [selectedCategory, debouncedPrice, searchQuery]
   );
 
   // Re-fetch when filters/search change
@@ -216,7 +233,6 @@ export function Products() {
           </div>
         ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
-            {/* All option */}
             <div className="flex items-center gap-2">
               <Checkbox
                 id="cat-all"
@@ -255,6 +271,10 @@ export function Products() {
       {/* Price range */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Price Range</h3>
+        {/*
+          Slider updates `priceRange` on every drag tick (smooth UI feedback).
+          The API only re-fetches when `debouncedPrice` settles (400ms after release).
+        */}
         <Slider
           value={priceRange}
           onValueChange={setPriceRange}
@@ -266,6 +286,13 @@ export function Products() {
           <span>₦{(priceRange[0] ?? 0).toLocaleString()}</span>
           <span>₦{(priceRange[1] ?? MAX_PRICE).toLocaleString()}</span>
         </div>
+        {/* Visual indicator that filter is pending (slider moved but debounce hasn't fired) */}
+        {(priceRange[0] !== debouncedPrice[0] || priceRange[1] !== debouncedPrice[1]) && (
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Applying filter…
+          </p>
+        )}
       </div>
 
       <Button
