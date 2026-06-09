@@ -1,7 +1,7 @@
 import type { Product } from '../types/product';
 
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://ndeko-backend-prod.onrender.com';
+const BASE_URL = import.meta.env.VITE_API_URL ?? ' https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
 let _accessToken: string | null = null;
