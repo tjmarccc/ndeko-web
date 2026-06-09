@@ -1,7 +1,7 @@
 import type { Product } from '../types/product';
 
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? ' https://ndeko-backend-dev.onrender.com';
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
 let _accessToken: string | null = null;
@@ -201,6 +201,12 @@ export interface KycSubmission {
   created_at: string;
 }
 
+// ── Register body shapes ───────────────────────────────────────────────────────
+// Discriminated union so TypeScript enforces business_name when role === 'SELLER'
+export type RegisterBody =
+  | { name: string; email: string; password: string; role: 'BUYER' }
+  | { name: string; email: string; password: string; role: 'SELLER'; business_name: string };
+
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
   const q = new URLSearchParams();
@@ -321,9 +327,9 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-export const registerUser = (body: {
-  email: string; password: string; name: string; role: string; business_name?: string;
-}) => publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
+// Accepts the discriminated union — SELLER calls must include business_name
+export const registerUser = (body: RegisterBody) =>
+  publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
 
 export const loginUser = (body: { email: string; password: string }) =>
   publicFetch<AuthResponse>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(body) });
@@ -365,23 +371,15 @@ export const fetchCategories = (params?: { search?: string; parent_id?: string; 
 export const fetchProducts = (params?: { page?: number; limit?: number; category?: string }) =>
   publicFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products${buildQuery(params)}`);
 
-// CHANGE 2: fetchProductById previously returned whatever the API gave back
-// (which is a PaginatedResponse wrapper, not a bare ApiProduct). ProductDetail.tsx
-// calls mapApiProduct() directly on the result, so it would silently get
-// undefined for every field (images, name, price, etc.) — causing the missing
-// product details AND missing related products section.
-// Fix: unwrap the paginated envelope and return the first item.
 export const fetchProductById = async (id: string): Promise<ApiProduct> => {
   const res = await publicFetch<PaginatedResponse<ApiProduct> | ApiProduct>(
     `/api/v1/products?id=${encodeURIComponent(id)}`
   );
-  // API returns { data: [...], total, page, limit } even for a single-product ?id= query
   if (res && typeof res === 'object' && 'data' in res && Array.isArray((res as PaginatedResponse<ApiProduct>).data)) {
     const item = (res as PaginatedResponse<ApiProduct>).data[0];
     if (!item) throw new ApiError('Product not found', 404);
     return item;
   }
-  // Fallback: API returned a bare object (future-proofing)
   return res as ApiProduct;
 };
 

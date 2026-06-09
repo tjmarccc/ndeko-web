@@ -14,6 +14,7 @@ import {
   getMe,
   tokenStore,
   SESSION_EXPIRED_EVENT,
+  type RegisterBody,
   type AuthUser,
   type ApiError,
 } from '../services/api';
@@ -45,8 +46,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
 
   // ── Listen for session expiry fired by api.ts ───────────────────────────────
-  // api.ts dispatches SESSION_EXPIRED_EVENT instead of doing window.location.href,
-  // keeping the API layer navigation-agnostic.
   useEffect(() => {
     function handleExpired() {
       setUser(null);
@@ -97,7 +96,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: 'BUYER' | 'SELLER';
       business_name?: string;
     }) => {
-      const data = await registerUser(params);
+      const body: RegisterBody =
+        params.role === 'SELLER'
+          ? {
+              name: params.name,
+              email: params.email,
+              password: params.password,
+              role: 'SELLER',
+              business_name: params.business_name ?? '',
+            }
+          : {
+              name: params.name,
+              email: params.email,
+              password: params.password,
+              role: 'BUYER',
+            };
+      const data = await registerUser(body);
       handleAuthResponse(data);
     },
     [handleAuthResponse]
