@@ -40,8 +40,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]     = useState<AuthUser | null>(() => tokenStore.getUser());
-  const [token, setToken]   = useState<string | null>(() => tokenStore.getAccess());
+  const [user, setUser]       = useState<AuthUser | null>(() => tokenStore.getUser());
+  const [token, setToken]     = useState<string | null>(() => tokenStore.getAccess());
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -96,17 +96,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: 'BUYER' | 'SELLER';
       business_name?: string;
     }) => {
+      const [first_name, ...rest] = params.name.trim().split(' ');
+      const last_name = rest.join(' ') || first_name;
+
       const body: RegisterBody =
         params.role === 'SELLER'
           ? {
-              name: params.name,
+              first_name,
+              last_name,
               email: params.email,
               password: params.password,
               role: 'SELLER',
               business_name: params.business_name ?? '',
             }
           : {
-              name: params.name,
+              first_name,
+              last_name,
               email: params.email,
               password: params.password,
               role: 'BUYER',

@@ -201,11 +201,10 @@ export interface KycSubmission {
   created_at: string;
 }
 
-// ── Register body shapes ───────────────────────────────────────────────────────
-// Discriminated union so TypeScript enforces business_name when role === 'SELLER'
+// ── Fixed: email added to both variants ───────────────────────────────────────
 export type RegisterBody =
-  | { name: string; email: string; password: string; role: 'BUYER' }
-  | { name: string; email: string; password: string; role: 'SELLER'; business_name: string };
+  | { first_name: string; last_name: string; email: string; password: string; role: 'BUYER' }
+  | { first_name: string; last_name: string; email: string; password: string; role: 'SELLER'; business_name: string };
 
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
@@ -327,7 +326,6 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-// Accepts the discriminated union — SELLER calls must include business_name
 export const registerUser = (body: RegisterBody) =>
   publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
 
