@@ -203,8 +203,8 @@ export interface KycSubmission {
 
 // ── Fixed: email added to both variants ───────────────────────────────────────
 export type RegisterBody =
-  | { first_name: string; last_name: string; email: string; password: string; role: 'BUYER' }
-  | { first_name: string; last_name: string; email: string; password: string; role: 'SELLER'; business_name: string };
+  | { first_name: string; last_name: string; email: string; password: string; }
+  | { first_name: string; last_name: string; email: string; password: string; business_name: string };
 
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
