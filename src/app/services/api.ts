@@ -4,11 +4,11 @@ import type { Product } from '../types/product';
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
-let _accessToken: string | null = null;
+let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
 
 export const tokenStore = {
   getAccess: () => _accessToken,
-  setAccess: (t: string) => { _accessToken = t; },
+  setAccess: (t: string) => { _accessToken = t; localStorage.setItem('ndeko_access_token', t); },
 
   getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
   setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
@@ -25,6 +25,7 @@ export const tokenStore = {
 
   clear: () => {
     _accessToken = null;
+    localStorage.removeItem('ndeko_access_token');
     localStorage.removeItem('ndeko_refresh_token');
     localStorage.removeItem('ndeko_user');
   },
@@ -62,9 +63,15 @@ export interface AuthTokens {
 export interface AuthUser {
   id: string;
   email: string;
-  name: string;
+  first_name: string;
+  last_name: string;
+  /** Convenience getter — not sent by API, derived on the frontend */
+  name?: string;
   role: string;
   is_email_verified: boolean;
+  is_identity_verified?: boolean;
+  avatar_url?: string;
+  /** @deprecated use avatar_url */
   avatar?: string;
   phone?: string;
 }

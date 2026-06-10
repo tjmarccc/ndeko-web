@@ -1,4 +1,4 @@
-import { createBrowserRouter, useLocation } from 'react-router';
+import { createBrowserRouter, useLocation, Navigate, Outlet } from 'react-router';
 import { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { BusinessLayout } from './components/BusinessLayout';
@@ -23,7 +23,7 @@ import { BusinessStorefront } from './pages/business/BusinessStorefront';
 import { BusinessAnalytics } from './pages/business/BusinessAnalytics';
 import { BusinessSettings } from './pages/business/BusinessSettings';
 import { BusinessNotifications } from './pages/business/BusinessNotifications';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 
@@ -48,6 +48,33 @@ function Providers({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── PrivateRoute — waits for auth to resolve; only redirects when confirmed unauthenticated ──
+function PrivateRoute() {
+  const { user, loading } = useAuth();
+  const { pathname } = useLocation();
+
+  if (loading) {
+    // Auth is still resolving (token refresh in flight) — render nothing rather than redirecting
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className="w-10 h-10 rounded-full border-2 border-[#8B1538] border-t-transparent animate-spin"
+          />
+          <p className="text-sm text-gray-400">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    // Auth definitively failed — redirect to login, preserving intended destination
+    return <Navigate to={`/login?redirect=${encodeURIComponent(pathname)}`} replace />;
+  }
+
+  return <Outlet />;
+}
+
 // ── Root layouts (each calls useScrollToTop) ──────────────────────────────────
 function LoginRoot() {
   useScrollToTop();
@@ -62,7 +89,7 @@ function BusinessRoot() {
   useScrollToTop();
   return (
     <Providers>
-      <BusinessLayout />
+      <PrivateRoute />
     </Providers>
   );
 }
@@ -87,14 +114,20 @@ export const router = createBrowserRouter([
     path: '/business',
     Component: BusinessRoot,
     children: [
-      { index: true, Component: BusinessDashboard },
-      { path: 'inventory', Component: BusinessInventory },
-      { path: 'orders', Component: BusinessOrders },
-      { path: 'storefront', Component: BusinessStorefront },
-      { path: 'analytics', Component: BusinessAnalytics },
-      { path: 'settings', Component: BusinessSettings },
-      { path: 'notifications', Component: BusinessNotifications },
-      { path: 'vendors', Component: VendorSearch },
+      {
+        // All /business/* routes are protected — PrivateRoute is the parent outlet
+        element: <BusinessLayout />,
+        children: [
+          { index: true, Component: BusinessDashboard },
+          { path: 'inventory', Component: BusinessInventory },
+          { path: 'orders', Component: BusinessOrders },
+          { path: 'storefront', Component: BusinessStorefront },
+          { path: 'analytics', Component: BusinessAnalytics },
+          { path: 'settings', Component: BusinessSettings },
+          { path: 'notifications', Component: BusinessNotifications },
+          { path: 'vendors', Component: VendorSearch },
+        ],
+      },
     ],
   },
 
@@ -109,7 +142,14 @@ export const router = createBrowserRouter([
       { path: 'checkout', Component: Checkout },
       { path: 'order-confirmation', Component: OrderConfirmation },
       { path: 'deals', Component: Deals },
-      { path: 'account', Component: Account },
+      {
+        // Account requires auth; other buyer routes are public
+        element: <PrivateRoute />,
+        children: [
+          { path: 'account', Component: Account },
+          { path: 'checkout', Component: Checkout },
+        ],
+      },
       { path: 'wishlist', Component: Wishlist },
       { path: 'help', Component: Help },
       { path: 'contact', Component: Contact },

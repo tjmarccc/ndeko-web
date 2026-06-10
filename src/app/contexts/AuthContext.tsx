@@ -50,23 +50,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     function handleExpired() {
       setUser(null);
       setToken(null);
-      navigate('/login', { replace: true });
+      // Only redirect if not already on /login
+      if (!window.location.pathname.startsWith('/login')) {
+        navigate(`/login?redirect=${encodeURIComponent(window.location.pathname)}`, { replace: true });
+      }
     }
     window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
   }, [navigate]);
 
-  // ── On mount: validate stored token ────────────────────────────────────────
+  // ── On mount: restore access token then validate ────────────────────────────
   useEffect(() => {
+    // Restore persisted access token into memory first (tokenStore.getAccess()
+    // is already seeded from localStorage at module load, so getMe() will have a
+    // token on the very first call — no 401 flash on page reload).
     const storedToken = tokenStore.getAccess();
-    if (!storedToken) {
+    if (!storedToken && !tokenStore.getRefresh()) {
+      // Nothing stored at all — definitively not logged in
       setLoading(false);
       return;
     }
     getMe()
       .then((u: AuthUser) => {
         setUser(u);
-        setToken(storedToken);
+        setToken(tokenStore.getAccess());
         tokenStore.setUser(u);
       })
       .catch(() => {

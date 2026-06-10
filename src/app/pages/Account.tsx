@@ -275,7 +275,8 @@ function AddPaymentModal({
 // ─── Tab panels ───────────────────────────────────────────────────────────────
 
 function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) => void }) {
-  const [form, setForm] = useState({ name: user.name ?? '', phone: user.phone ?? '' });
+  const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
+  const [form, setForm] = useState({ name: fullName, phone: user.phone ?? '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -539,7 +540,7 @@ export function Account() {
           <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
         ) : (
           <div className="bg-[#8B1538] text-white w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
-            {user ? getInitials(user.name) : '?'}
+            {user ? getInitials(`${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email) : '?'}
           </div>
         )}
         <div className="min-w-0">
@@ -550,7 +551,7 @@ export function Account() {
             </>
           ) : (
             <>
-              <p className="font-semibold dark:text-white truncate">{user?.name ?? '—'}</p>
+              <p className="font-semibold dark:text-white truncate">{user ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email : '—'}</p>
               <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{user?.email ?? '—'}</p>
             </>
           )}
