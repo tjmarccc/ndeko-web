@@ -16,6 +16,7 @@ import {
   SESSION_EXPIRED_EVENT,
   type RegisterBody,
   type AuthUser,
+  type AuthResponse,
   type ApiError,
 } from '../services/api';
 
@@ -85,12 +86,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleAuthResponse = useCallback(
-    (data: { user: AuthUser; access_token: string; refresh_token: string }) => {
-      tokenStore.setAccess(data.access_token);
-      tokenStore.setRefresh(data.refresh_token);
+    (data: AuthResponse) => {
+      tokenStore.setAccess(data.tokens.access_token);
+      tokenStore.setRefresh(data.tokens.refresh_token);
       tokenStore.setUser(data.user);
       setUser(data.user);
-      setToken(data.access_token);
+      setToken(data.tokens.access_token);
     },
     []
   );

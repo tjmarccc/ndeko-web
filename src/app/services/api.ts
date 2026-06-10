@@ -76,9 +76,11 @@ export interface AuthUser {
   phone?: string;
 }
 
-export interface AuthResponse extends AuthTokens {
+export interface AuthResponse {
   user: AuthUser;
+  tokens: AuthTokens;
   _dev_verify_link?: string;
+  is_new_user?: boolean;
 }
 
 export interface ApiCategory {
@@ -232,10 +234,13 @@ async function doRefresh(): Promise<AuthTokens> {
   _refreshPromise = (async () => {
     const refresh = tokenStore.getRefresh();
     if (!refresh) throw new ApiError('No refresh token', 401);
-    return publicFetch<AuthTokens>('/api/v1/auth/refresh', {
+    // After envelope unwrap, refresh returns { tokens: { access_token, refresh_token } }
+    const result = await publicFetch<{ tokens: AuthTokens } | AuthTokens>('/api/v1/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refresh_token: refresh }),
     });
+    // Handle both nested { tokens } and flat shapes defensively
+    return ('tokens' in result && result.tokens) ? result.tokens : result as AuthTokens;
   })().finally(() => {
     _refreshPromise = null;
   });
@@ -292,10 +297,21 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
   const json = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (json as Record<string, string>)?.message ?? `Request failed: ${res.status}`;
+    const msg = (json as Record<string, unknown>)?.message as string ?? `Request failed: ${res.status}`;
     throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
   }
 
+  // Unwrap the standard { success, message, data[, meta] } envelope.
+  // For paginated responses the server sends { data: T[], meta: { total, page, limit } }.
+  // We reassemble that into the PaginatedResponse shape the callers expect.
+  const envelope = json as Record<string, unknown>;
+  if (envelope?.data !== undefined) {
+    if (envelope.meta && typeof envelope.meta === 'object') {
+      // Paginated: merge data array + meta fields into one flat object
+      return { data: envelope.data, ...(envelope.meta as object) } as T;
+    }
+    return envelope.data as T;
+  }
   return json as T;
 }
 
@@ -323,10 +339,18 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
   const json = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (json as Record<string, string>)?.message ?? `Request failed: ${res.status}`;
+    const msg = (json as Record<string, unknown>)?.message as string ?? `Request failed: ${res.status}`;
     throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
   }
 
+  // Unwrap the standard { success, message, data[, meta] } envelope
+  const envelope = json as Record<string, unknown>;
+  if (envelope?.data !== undefined) {
+    if (envelope.meta && typeof envelope.meta === 'object') {
+      return { data: envelope.data, ...(envelope.meta as object) } as T;
+    }
+    return envelope.data as T;
+  }
   return json as T;
 }
 
