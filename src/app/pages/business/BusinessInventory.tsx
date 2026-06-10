@@ -1,143 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Search, Plus, Edit, Trash2, AlertTriangle, Package,
-  TrendingUp, DollarSign, Filter, RefreshCw, X, ChevronLeft,
-  ChevronRight, Loader2, CheckCircle, XCircle, UploadCloud,
+  DollarSign, Filter, RefreshCw, X, ChevronLeft,
+  ChevronRight, Loader2, CheckCircle, XCircle,
 } from 'lucide-react';
-
-// ─── Inline API layer (mirrors api.ts) ────────────────────────────────────────
-
-const BASE_URL = 'https://ndeko-backend-prod.onrender.com';
-
-const tokenStore = {
-  getAccess: () => localStorage.getItem('ndeko_access_token'),
-  getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
-  setAccess: (t: string) => localStorage.setItem('ndeko_access_token', t),
-  setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
-  clear: () => {
-    localStorage.removeItem('ndeko_access_token');
-    localStorage.removeItem('ndeko_refresh_token');
-    localStorage.removeItem('ndeko_user');
-  },
-};
-
-class ApiError extends Error {
-  constructor(public message: string, public status: number, public body: unknown = null) {
-    super(message);
-  }
-}
-
-async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers as object) },
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const token = tokenStore.getAccess();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as object),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-
-  if (res.status === 401 && retry) {
-    const refresh = tokenStore.getRefresh();
-    if (refresh) {
-      try {
-        const tokens = await publicFetch<{ access_token: string; refresh_token?: string }>(
-          '/api/v1/auth/refresh',
-          { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }
-        );
-        tokenStore.setAccess(tokens.access_token);
-        if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
-        return authFetch<T>(path, options, false);
-      } catch {}
-    }
-    tokenStore.clear();
-    window.location.href = '/login';
-    throw new ApiError('Session expired', 401);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ApiCategory { id: string; name: string; slug: string; parent_id?: string | null }
-
-interface ApiProduct {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  original_price?: number;
-  discount?: number;
-  stock_quantity: number;
-  stock_status: 'in_stock' | 'out_of_stock' | 'low_stock';
-  images: string[];
-  sku: string;
-  is_active: boolean;
-  category?: ApiCategory;
-  store?: { id: string; store_name: string; store_slug: string };
-  average_rating?: number;
-  review_count?: number;
-  created_at: string;
-}
-
-interface ApiStore {
-  id: string;
-  store_name: string;
-  store_slug: string;
-  description?: string;
-  logo?: string;
-  city?: string;
-  category?: ApiCategory;
-  status: string;
-}
-
-interface PaginatedResponse<T> { data: T[]; total: number; page: number; limit: number }
-
-// ─── API calls ────────────────────────────────────────────────────────────────
-
-const getMyStores = () =>
-  authFetch<PaginatedResponse<ApiStore>>('/api/v1/stores/my');
-
-const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiProduct>>(
-    `/api/v1/products/stores/${storeId}?page=${page}&limit=${limit}`
-  );
-
-const createProduct = (storeId: string, body: {
-  name: string; description: string; price: number;
-  original_price?: number; stock_quantity: number;
-  category_id: string; images: string[];
-}) =>
-  authFetch<ApiProduct>(`/api/v1/products/stores/${storeId}`, {
-    method: 'POST', body: JSON.stringify(body),
-  });
-
-const updateProduct = (storeId: string, productId: string, body: Partial<ApiProduct>) =>
-  authFetch<ApiProduct>(`/api/v1/products/stores/${storeId}/${productId}`, {
-    method: 'PATCH', body: JSON.stringify(body),
-  });
-
-const deleteProduct = (storeId: string, productId: string) =>
-  authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
-
-const fetchCategories = (params?: { page?: number; limit?: number }) => {
-  const q = new URLSearchParams();
-  if (params?.page) q.set('page', String(params.page));
-  if (params?.limit) q.set('limit', String(params.limit));
-  return publicFetch<PaginatedResponse<ApiCategory>>(`/api/v1/categories?${q}`);
-};
+import {
+  ApiError,
+  getMyStores,
+  getStoreProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  fetchCategories,
+  type ApiProduct,
+  type ApiStore,
+  type ApiCategory,
+  type PaginatedResponse,
+} from '../../services/api';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -317,12 +196,20 @@ export function BusinessInventory() {
           getMyStores(),
           fetchCategories({ limit: 100 }),
         ]);
-        setStores(storesRes.data ?? []);
-        setCategories(catsRes.data ?? []);
-        const first = storesRes.data?.[0]?.id;
-        if (first) setStoreId(first);
+        const storeList = (storesRes as PaginatedResponse<ApiStore>).data ?? [];
+        setStores(storeList);
+        setCategories((catsRes as PaginatedResponse<ApiCategory>).data ?? []);
+        const first = storeList[0]?.id;
+        if (first) {
+          setStoreId(first);
+        } else {
+          // No stores — stop loading so the UI isn't stuck on a spinner
+          setLoading(false);
+          setLoadError('No stores found. Create a store to manage inventory.');
+        }
       } catch (e: unknown) {
         setLoadError(e instanceof ApiError ? e.message : 'Failed to load store data.');
+        setLoading(false);
       }
     })();
   }, []);
@@ -381,12 +268,14 @@ export function BusinessInventory() {
   };
 
   const handleSaved = (saved: ApiProduct) => {
+    // Capture mode before clearing modal to avoid stale state in toast message
+    const savedMode = modal?.mode;
     setProducts(ps => {
       const exists = ps.find(p => p.id === saved.id);
       return exists ? ps.map(p => p.id === saved.id ? saved : p) : [saved, ...ps];
     });
     setModal(null);
-    showToast(modal?.mode === 'add' ? 'Product added!' : 'Product updated!', 'success');
+    showToast(savedMode === 'add' ? 'Product added!' : 'Product updated!', 'success');
   };
 
   const totalPages = Math.ceil((total ?? 0) / LIMIT);

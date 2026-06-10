@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
   TrendingUp, ShoppingBag, Package, Eye, ArrowUpRight,
@@ -8,145 +8,32 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts';
+import {
+  ApiError,
+  getMyStores,
+  getStoreDashboard,
+  getTopProducts,
+  getStoreOrders,
+  getStoreProducts,
+  type ApiStore,
+  type ApiProduct,
+  type ApiOrder,
+  type PaginatedResponse,
+  type StoreDashboard,
+} from '../../services/api';
 
-// ─── API layer ────────────────────────────────────────────────────────────────
+// ─── Local dashboard data type (extends StoreDashboard with optional fields) ──
 
-const BASE_URL = 'https://ndeko-backend-prod.onrender.com';
-
-const tokenStore = {
-  getAccess: () => localStorage.getItem('ndeko_access_token'),
-  getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
-  setAccess: (t: string) => localStorage.setItem('ndeko_access_token', t),
-  setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
-  clear: () => {
-    localStorage.removeItem('ndeko_access_token');
-    localStorage.removeItem('ndeko_refresh_token');
-    localStorage.removeItem('ndeko_user');
-  },
-};
-
-class ApiError extends Error {
-  constructor(public message: string, public status: number, public body: unknown = null) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers as object) },
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const token = tokenStore.getAccess();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as object),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-
-  if (res.status === 401 && retry) {
-    const refresh = tokenStore.getRefresh();
-    if (refresh) {
-      try {
-        const tokens = await publicFetch<{ access_token: string; refresh_token?: string }>(
-          '/api/v1/auth/refresh',
-          { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }
-        );
-        tokenStore.setAccess(tokens.access_token);
-        if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
-        return authFetch<T>(path, options, false);
-      } catch { /* fall through to redirect */ }
-    }
-    tokenStore.clear();
-    window.location.href = '/login';
-    throw new ApiError('Session expired', 401);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ApiStore {
-  id: string;
-  store_name: string;
-  store_slug: string;
-  status: string;
-  average_rating?: number;
-  visitor_count?: number;
-}
-
-interface ApiOrder {
-  id: string;
-  order_number: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
-  payment_status: 'pending' | 'paid' | 'failed';
-  payment_method: string;
-  total_amount: number;
-  created_at: string;
-}
-
-interface ApiProduct {
-  id: string;
-  name: string;
-  price: number;
-  stock_quantity: number;
-  stock_status: 'in_stock' | 'out_of_stock' | 'low_stock';
-  images: string[];
-  review_count?: number;
-}
-
-interface PaginatedResponse<T> { data: T[]; total: number; page: number; limit: number }
-
-interface DashboardData {
+interface DashboardData extends Partial<StoreDashboard> {
   total_revenue?: number;
-  revenue?: number;
   total_orders?: number;
-  orders_count?: number;
   total_products?: number;
   active_products?: number;
   visitors?: number;
-  visitor_count?: number;
   revenue_by_day?: { date: string; revenue: number }[];
   order_status_summary?: Record<string, number>;
   [key: string]: unknown;
 }
-
-// ─── API helpers ──────────────────────────────────────────────────────────────
-
-const getMyStores = () =>
-  authFetch<PaginatedResponse<ApiStore> | ApiStore[]>('/api/v1/stores/my');
-
-const getStoreDashboard = (storeId: string, from?: string, to?: string) => {
-  const q = new URLSearchParams();
-  if (from) q.set('from', from);
-  if (to) q.set('to', to);
-  return authFetch<DashboardData>(`/api/v1/analytics/stores/${storeId}/dashboard?${q}`);
-};
-
-const getTopProducts = (storeId: string, limit = 5) =>
-  authFetch<ApiProduct[] | PaginatedResponse<ApiProduct>>(
-    `/api/v1/analytics/stores/${storeId}/top-products?limit=${limit}`
-  );
-
-const getStoreOrders = (storeId: string, page = 1, limit = 5) =>
-  authFetch<PaginatedResponse<ApiOrder>>(
-    `/api/v1/orders/stores/${storeId}?page=${page}&limit=${limit}`
-  );
-
-const getStoreProducts = (storeId: string, page = 1, limit = 100) =>
-  authFetch<PaginatedResponse<ApiProduct>>(
-    `/api/v1/products/stores/${storeId}?page=${page}&limit=${limit}`
-  );
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -281,7 +168,8 @@ export function BusinessDashboard() {
     (async () => {
       try {
         const raw = await getMyStores();
-        const list: ApiStore[] = Array.isArray(raw) ? raw : (raw as PaginatedResponse<ApiStore>).data ?? [];
+        // api.ts always returns PaginatedResponse<ApiStore>
+        const list: ApiStore[] = (raw as PaginatedResponse<ApiStore>).data ?? [];
         setStores(list);
         if (list[0]?.id) setStoreId(list[0].id);
         else { setLoading(false); setError('No stores found. Create a store to see your dashboard.'); }
@@ -312,8 +200,9 @@ export function BusinessDashboard() {
         getStoreProducts(storeId, 1, 100),
       ]);
 
-      if (dash.status === 'fulfilled') setDashboard(dash.value);
+      if (dash.status === 'fulfilled') setDashboard(dash.value as DashboardData);
       if (tpRaw.status === 'fulfilled') {
+        // api.ts getTopProducts returns ApiProduct[]
         const v = tpRaw.value;
         setTopProducts(Array.isArray(v) ? v : (v as PaginatedResponse<ApiProduct>).data ?? []);
       }
@@ -331,15 +220,19 @@ export function BusinessDashboard() {
 
   // ── Derived values ──────────────────────────────────────────────────────────
 
-  const revenue = ((dashboard?.total_revenue ?? dashboard?.revenue ?? 0) as number);
-  const ordersCount = ((dashboard?.total_orders ?? dashboard?.orders_count ?? 0) as number);
+  // api.ts StoreDashboard uses: revenue, orders_count, visitor_count, orders_by_status
+  const revenue = ((dashboard?.revenue ?? dashboard?.total_revenue ?? 0) as number);
+  const ordersCount = ((dashboard?.orders_count ?? dashboard?.total_orders ?? 0) as number);
   const activeProducts = ((dashboard?.total_products ?? dashboard?.active_products ?? allProducts.filter(p => p.stock_status !== 'out_of_stock').length) as number);
-  const visitors = ((dashboard?.visitors ?? dashboard?.visitor_count ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0) as number);
+  const visitors = ((dashboard?.visitor_count ?? dashboard?.visitors ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0) as number);
 
   const lowStock = allProducts.filter(p => p.stock_status === 'low_stock').length;
   const outOfStock = allProducts.filter(p => p.stock_status === 'out_of_stock').length;
 
-  const statusSummary = (dashboard?.order_status_summary as Record<string, number> | undefined) ?? (() => {
+  // api.ts StoreDashboard uses orders_by_status (not order_status_summary)
+  const statusSummary = (
+    (dashboard?.orders_by_status ?? dashboard?.order_status_summary) as Record<string, number> | undefined
+  ) ?? (() => {
     const s: Record<string, number> = { pending: 0, processing: 0, shipped: 0, delivered: 0 };
     recentOrders.forEach(o => { if (o.status in s) s[o.status]++; });
     return s;
@@ -350,8 +243,8 @@ export function BusinessDashboard() {
     recentOrders
   );
 
-  // Max sold for % bar scaling
-  const maxSold = Math.max(...topProducts.map(p => p.stock_quantity ?? 1), 1);
+  // Use review_count as the ranking metric for the % bar (stock_quantity ≠ sales rank)
+  const maxReviews = Math.max(...topProducts.map(p => p.review_count ?? 0), 1);
 
   return (
     <>
@@ -728,7 +621,7 @@ export function BusinessDashboard() {
                       <span className="db-top-product__price">{fmt(p.price ?? 0)}</span>
                     </div>
                     <div className="db-bar-track">
-                      <div className="db-bar-fill" style={{ width: `${Math.round(((p.stock_quantity ?? 0) / maxSold) * 100)}%` }} />
+                      <div className="db-bar-fill" style={{ width: `${Math.round(((p.review_count ?? 0) / maxReviews) * 100)}%` }} />
                     </div>
                   </div>
                 ))
@@ -844,4 +737,4 @@ export function BusinessDashboard() {
   );
 }
 
-export default BusinessDashboard;   
+export default BusinessDashboard;
