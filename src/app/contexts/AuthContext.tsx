@@ -28,11 +28,11 @@ interface AuthContextType {
     name: string;
     email: string;
     password: string;
-    role: 'BUYER' | 'SELLER';
+    role: 'buyer' | 'seller';
     business_name?: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: (idToken: string, role?: 'BUYER' | 'SELLER') => Promise<void>;
+  loginWithGoogle: (idToken: string, role?: 'buyer' | 'seller') => Promise<void>;
   logout: () => Promise<void>;
   isSeller: boolean;
 }
@@ -93,20 +93,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: string;
       email: string;
       password: string;
-      role: 'BUYER' | 'SELLER';
+      role: 'buyer' | 'seller';
       business_name?: string;
     }) => {
       const [first_name, ...rest] = params.name.trim().split(' ');
       const last_name = rest.join(' ') || first_name;
 
       const body: RegisterBody =
-        params.role === 'SELLER'
+        params.role === 'seller'
           ? {
               first_name,
               last_name,
               email: params.email,
               password: params.password,
-              role: 'SELLER',
+              role: 'seller',
               business_name: params.business_name ?? '',
             }
           : {
@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               last_name,
               email: params.email,
               password: params.password,
-              role: 'BUYER',
+              role: 'buyer',
             };
       const data = await registerUser(body);
       handleAuthResponse(data);
@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loginWithGoogle = useCallback(
-    async (idToken: string, role?: 'BUYER' | 'SELLER') => {
+    async (idToken: string, role?: 'buyer' | 'seller') => {
       const data = await googleAuth({ id_token: idToken, role });
       handleAuthResponse(data);
     },
@@ -148,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
   }, []);
 
-  const isSeller = user?.role === 'SELLER' || user?.role === 'ADMIN';
+  const isSeller = user?.role === 'seller' || user?.role === 'admin';
 
   return (
     <AuthContext.Provider

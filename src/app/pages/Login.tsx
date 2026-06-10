@@ -41,7 +41,7 @@ export function Login() {
           name: fullName,
           email: form.email,
           password: form.password,
-          role: role === 'business' ? 'SELLER' : 'BUYER',
+          role: role === 'business' ? 'seller' : 'buyer',
         };
         if (role === 'business' && form.businessName) {
           params.business_name = form.businessName;
@@ -437,7 +437,7 @@ function GoogleButton({
         try {
           await loginWithGoogle(
             credential,
-            mode === 'signup' ? (role === 'business' ? 'SELLER' : 'BUYER') : undefined
+            mode === 'signup' ? (role === 'business' ? 'seller' : 'buyer') : undefined
           );
           navigate(role === 'business' ? '/business' : '/');
         } catch (err) {
