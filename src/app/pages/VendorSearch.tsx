@@ -14,6 +14,12 @@ import type { Product } from '../types/product';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Extracts the category name whether the backend returns a string or full object */
+function storeCatName(cat: string | ApiCategory | undefined): string | undefined {
+  if (!cat) return undefined;
+  return typeof cat === 'string' ? cat : cat.name;
+}
+
 /** Derive initials from a store name */
 function getInitials(name: string): string {
   return name
@@ -70,7 +76,7 @@ interface StoreWithProducts extends ApiStore {
 function VendorCard({ store, onClick }: { store: StoreWithProducts; onClick: () => void }) {
   const { cover, accent } = palette(store.id);
   const initials = getInitials(store.store_name);
-  const isVerified = store.status === 'active' || store.status === 'verified';
+  const isVerified = store.status === 'active';
 
   return (
     <div
@@ -94,8 +100,8 @@ function VendorCard({ store, onClick }: { store: StoreWithProducts; onClick: () 
           className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-xl"
           style={{ background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(6px)', border: '3px solid white' }}
         >
-          {store.logo ? (
-            <img src={store.logo} alt={store.store_name} className="w-full h-full object-cover rounded-xl" />
+          {store.logo_url ? (
+            <img src={store.logo_url} alt={store.store_name} className="w-full h-full object-cover rounded-xl" />
           ) : (
             initials
           )}
@@ -114,7 +120,7 @@ function VendorCard({ store, onClick }: { store: StoreWithProducts; onClick: () 
               )}
             </div>
             <p className="text-gray-500 dark:text-gray-400 text-xs mt-0.5 line-clamp-1">
-              {store.description ?? store.category?.name ?? 'Ndeko Store'}
+              {store.description ?? storeCatName(store.category) ?? 'Ndeko Store'}
             </p>
           </div>
         </div>
@@ -177,7 +183,7 @@ function VendorCard({ store, onClick }: { store: StoreWithProducts; onClick: () 
 function VendorDetailModal({ store, onClose }: { store: StoreWithProducts; onClose: () => void }) {
   const { cover, accent } = palette(store.id);
   const initials = getInitials(store.store_name);
-  const isVerified = store.status === 'active' || store.status === 'verified';
+  const isVerified = store.status === 'active';
 
   return (
     <div
@@ -211,8 +217,8 @@ function VendorDetailModal({ store, onClose }: { store: StoreWithProducts; onClo
               className="w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl flex items-center justify-center text-white text-xl sm:text-2xl font-bold shadow-xl flex-shrink-0"
               style={{ background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)', border: '3px solid rgba(255,255,255,0.4)' }}
             >
-              {store.logo ? (
-                <img src={store.logo} alt={store.store_name} className="w-full h-full object-cover rounded-2xl" />
+              {store.logo_url ? (
+                <img src={store.logo_url} alt={store.store_name} className="w-full h-full object-cover rounded-2xl" />
               ) : initials}
             </div>
             <div className="min-w-0">
@@ -221,7 +227,7 @@ function VendorDetailModal({ store, onClose }: { store: StoreWithProducts; onClo
                 {isVerified && <Shield className="h-5 w-5 text-white fill-white flex-shrink-0" />}
               </div>
               <p className="text-white/75 text-sm line-clamp-1">
-                {store.description ?? store.category?.name ?? 'Ndeko Store'}
+                {store.description ?? storeCatName(store.category) ?? 'Ndeko Store'}
               </p>
               {store.average_rating != null && (
                 <div className="flex items-center gap-3 mt-2">
@@ -339,20 +345,20 @@ export function VendorSearch() {
       setCategories(catRes.data);
 
       // For each store, fetch a handful of products
+      const storeList = Array.isArray(storeRes) ? storeRes : (storeRes as { data: ApiStore[] }).data ?? [];
       const enriched: StoreWithProducts[] = await Promise.all(
-        storeRes.data.map(async (store) => {
+        storeList.map(async (store) => {
           let products: Product[] = [];
           try {
-            const prodRes = await fetchProducts({ page: 1, limit: 6 });
+            const prodRes = await fetchProducts({ store_id: store.id, page: 1, limit: 6 });
             if ('data' in prodRes) {
               products = (prodRes.data as ApiProduct[]).map(mapApiProduct);
             }
           } catch {
             // Products are optional; don't fail the whole card
           }
-          const categoryNames = store.category?.name
-            ? [store.category.name]
-            : [];
+          const catName = storeCatName(store.category);
+          const categoryNames = catName ? [catName] : [];
           return { ...store, products, categoryNames };
         })
       );
@@ -382,12 +388,12 @@ export function VendorSearch() {
         s.store_name.toLowerCase().includes(q) ||
         s.city?.toLowerCase().includes(q) ||
         s.description?.toLowerCase().includes(q) ||
-        s.category?.name.toLowerCase().includes(q) ||
+        storeCatName(s.category)?.toLowerCase().includes(q) ||
         s.products.some((p) => p.name.toLowerCase().includes(q));
 
       const matchCat =
         selectedCat === 'All' ||
-        s.category?.name === selectedCat ||
+        storeCatName(s.category) === selectedCat ||
         s.categoryNames.includes(selectedCat);
 
       return matchQuery && matchCat;

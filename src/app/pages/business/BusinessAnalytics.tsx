@@ -195,7 +195,7 @@ export function BusinessAnalytics() {
     setLoadingStores(true);
     getMyStores()
       .then((res) => {
-        const list = res.data ?? [];
+        const list = Array.isArray(res) ? res : (res as { data?: ApiStore[] }).data ?? [];
         setStores(list);
         if (list.length > 0) setSelectedStoreId(list[0].id);
       })
@@ -307,11 +307,10 @@ export function BusinessAnalytics() {
             <button
               key={r}
               onClick={() => setDateRange(r)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                dateRange === r
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${dateRange === r
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+                }`}
             >
               {r === '7d' ? '7 days' : r === '30d' ? '30 days' : '90 days'}
             </button>
@@ -533,14 +532,14 @@ export function BusinessAnalytics() {
                           style={{
                             background:
                               order.status === 'delivered' ? '#D1FAE5' :
-                              order.status === 'shipped' ? '#DBEAFE' :
-                              order.status === 'processing' ? '#FEF3C7' :
-                              order.status === 'cancelled' ? '#FEE2E2' : '#F3F4F6',
+                                order.status === 'shipped' ? '#DBEAFE' :
+                                  order.status === 'processing' ? '#FEF3C7' :
+                                    order.status === 'cancelled' ? '#FEE2E2' : '#F3F4F6',
                             color:
                               order.status === 'delivered' ? '#059669' :
-                              order.status === 'shipped' ? '#1D4ED8' :
-                              order.status === 'processing' ? '#D97706' :
-                              order.status === 'cancelled' ? '#DC2626' : '#6B7280',
+                                order.status === 'shipped' ? '#1D4ED8' :
+                                  order.status === 'processing' ? '#D97706' :
+                                    order.status === 'cancelled' ? '#DC2626' : '#6B7280',
                           }}
                         >
                           {order.status}

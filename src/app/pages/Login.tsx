@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Eye, EyeOff, ShoppingBag, Store, ArrowRight, Check, Loader2 } from 'lucide-react';
 import { NdekoLogo } from '../components/NdekoLogo';
 import { useAuth, extractApiErrorMessage } from '../contexts/AuthContext';
+import { UserRole } from '../services/api';
 
 export function Login() {
   const [searchParams] = useSearchParams();
@@ -32,23 +33,22 @@ export function Login() {
     setLoading(true);
     try {
       if (mode === 'login') {
-        await login(form.email, form.password);
-        navigate(role === 'business' ? '/business' : '/');
+        const user = await login(form.email, form.password);
+        navigate(user.role === UserRole.SELLER || user.role === UserRole.ADMIN ? '/business' : '/');
       } else {
-        // Combine first + last name into the single `name` field the API expects
         const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
         const params: Parameters<typeof register>[0] = {
           name: fullName,
           email: form.email,
           password: form.password,
-          role: role === 'business' ? 'seller' : 'buyer',
+          role: role === 'business' ? UserRole.SELLER : UserRole.BUYER,
         };
         if (role === 'business' && form.businessName) {
           params.business_name = form.businessName;
         }
-        await register(params);
+        const user = await register(params);
         setPendingVerification(true);
-        setTimeout(() => navigate(role === 'business' ? '/business' : '/'), 2500);
+        setTimeout(() => navigate(user.role === UserRole.SELLER || user.role === UserRole.ADMIN ? '/business' : '/'), 2500);
       }
     } catch (err) {
       setError(extractApiErrorMessage(err));
@@ -435,11 +435,11 @@ function GoogleButton({
       client_id: clientId,
       callback: async ({ credential }) => {
         try {
-          await loginWithGoogle(
+          const user = await loginWithGoogle(
             credential,
-            mode === 'signup' ? (role === 'business' ? 'seller' : 'buyer') : undefined
+            mode === 'signup' ? (role === 'business' ? UserRole.SELLER : UserRole.BUYER) : undefined
           );
-          navigate(role === 'business' ? '/business' : '/');
+          navigate(user.role === UserRole.SELLER || user.role === UserRole.ADMIN ? '/business' : '/');
         } catch (err) {
           setError(extractApiErrorMessage(err));
         } finally {

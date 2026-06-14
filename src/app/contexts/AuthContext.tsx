@@ -14,6 +14,7 @@ import {
   getMe,
   tokenStore,
   SESSION_EXPIRED_EVENT,
+  UserRole,
   type RegisterBody,
   type AuthUser,
   type AuthResponse,
@@ -29,11 +30,11 @@ interface AuthContextType {
     name: string;
     email: string;
     password: string;
-    role: 'buyer' | 'seller';
+    role: UserRole;
     business_name?: string;
-  }) => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: (idToken: string, role?: 'buyer' | 'seller') => Promise<void>;
+  }) => Promise<AuthUser>;
+  login: (email: string, password: string) => Promise<AuthUser>;
+  loginWithGoogle: (idToken: string, role?: UserRole) => Promise<AuthUser>;
   logout: () => Promise<void>;
   isSeller: boolean;
 }
@@ -101,20 +102,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: string;
       email: string;
       password: string;
-      role: 'buyer' | 'seller';
+      role: UserRole;
       business_name?: string;
-    }) => {
+    }): Promise<AuthUser> => {
       const [first_name, ...rest] = params.name.trim().split(' ');
       const last_name = rest.join(' ') || first_name;
 
       const body: RegisterBody =
-        params.role === 'seller'
+        params.role === UserRole.SELLER
           ? {
               first_name,
               last_name,
               email: params.email,
               password: params.password,
-              role: 'seller',
+              role: UserRole.SELLER,
               business_name: params.business_name ?? '',
             }
           : {
@@ -122,26 +123,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               last_name,
               email: params.email,
               password: params.password,
-              role: 'buyer',
+              role: UserRole.BUYER,
             };
       const data = await registerUser(body);
       handleAuthResponse(data);
+      return data.user;
     },
     [handleAuthResponse]
   );
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string): Promise<AuthUser> => {
       const data = await loginUser({ email, password });
       handleAuthResponse(data);
+      return data.user;
     },
     [handleAuthResponse]
   );
 
   const loginWithGoogle = useCallback(
-    async (idToken: string, role?: 'buyer' | 'seller') => {
+    async (idToken: string, role?: UserRole): Promise<AuthUser> => {
       const data = await googleAuth({ id_token: idToken, role });
       handleAuthResponse(data);
+      return data.user;
     },
     [handleAuthResponse]
   );
@@ -156,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
   }, []);
 
-  const isSeller = user?.role === 'seller' || user?.role === 'admin';
+  const isSeller = user?.role === UserRole.SELLER || user?.role === UserRole.ADMIN;
 
   return (
     <AuthContext.Provider

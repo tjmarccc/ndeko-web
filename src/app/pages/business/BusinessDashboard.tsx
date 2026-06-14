@@ -12,6 +12,7 @@ import {
   ApiError,
   getMyStores,
   getStoreDashboard,
+  getStoreSnapshots,
   getTopProducts,
   getStoreOrders,
   getStoreProducts,
@@ -20,20 +21,12 @@ import {
   type ApiOrder,
   type PaginatedResponse,
   type StoreDashboard,
+  type StoreSnapshot,
 } from '../../services/api';
 
-// ─── Local dashboard data type (extends StoreDashboard with optional fields) ──
+// ─── Local dashboard data type ────────────────────────────────────────────────
 
-interface DashboardData extends Partial<StoreDashboard> {
-  total_revenue?: number;
-  total_orders?: number;
-  total_products?: number;
-  active_products?: number;
-  visitors?: number;
-  revenue_by_day?: { date: string; revenue: number }[];
-  order_status_summary?: Record<string, number>;
-  [key: string]: unknown;
-}
+type DashboardData = StoreDashboard;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,15 +41,15 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// Build a 7-day revenue array from dashboard data or order list fallback
+// Build a 7-day revenue array from snapshots or order list fallback
 function buildRevenueChart(
-  revByDay?: { date: string; revenue: number }[],
+  snapshots?: StoreSnapshot[],
   orders?: ApiOrder[]
 ): { day: string; revenue: number }[] {
-  if (revByDay && revByDay.length > 0) {
-    return revByDay.slice(-7).map(d => ({
-      day: new Date(d.date).toLocaleDateString('en-NG', { weekday: 'short' }),
-      revenue: d.revenue ?? 0,
+  if (snapshots && snapshots.length > 0) {
+    return [...snapshots].reverse().slice(0, 7).reverse().map(s => ({
+      day: new Date(s.snapshot_date).toLocaleDateString('en-NG', { weekday: 'short' }),
+      revenue: s.revenue ?? 0,
     }));
   }
   // Fallback: bucket recent orders by day
@@ -80,11 +73,11 @@ function buildRevenueChart(
 // ─── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { bg: string; color: string; label: string }> = {
-  pending:    { bg: '#FEF3C7', color: '#D97706', label: 'Pending' },
+  pending: { bg: '#FEF3C7', color: '#D97706', label: 'Pending' },
   processing: { bg: '#DBEAFE', color: '#2563EB', label: 'Processing' },
-  shipped:    { bg: '#D1FAE5', color: '#059669', label: 'Shipped' },
-  delivered:  { bg: '#F0FDF4', color: '#16A34A', label: 'Delivered' },
-  cancelled:  { bg: '#FEE2E2', color: '#DC2626', label: 'Cancelled' },
+  shipped: { bg: '#D1FAE5', color: '#059669', label: 'Shipped' },
+  delivered: { bg: '#F0FDF4', color: '#16A34A', label: 'Delivered' },
+  cancelled: { bg: '#FEE2E2', color: '#DC2626', label: 'Cancelled' },
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -156,6 +149,7 @@ export function BusinessDashboard() {
   const [stores, setStores] = useState<ApiStore[]>([]);
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [snapshots, setSnapshots] = useState<StoreSnapshot[]>([]);
   const [topProducts, setTopProducts] = useState<ApiProduct[]>([]);
   const [recentOrders, setRecentOrders] = useState<ApiOrder[]>([]);
   const [allProducts, setAllProducts] = useState<ApiProduct[]>([]);
@@ -168,8 +162,7 @@ export function BusinessDashboard() {
     (async () => {
       try {
         const raw = await getMyStores();
-        // api.ts always returns PaginatedResponse<ApiStore>
-        const list: ApiStore[] = (raw as PaginatedResponse<ApiStore>).data ?? [];
+        const list: ApiStore[] = Array.isArray(raw) ? raw : (raw as { data?: ApiStore[] }).data ?? [];
         setStores(list);
         if (list[0]?.id) setStoreId(list[0].id);
         else { setLoading(false); setError('No stores found. Create a store to see your dashboard.'); }
@@ -193,16 +186,17 @@ export function BusinessDashboard() {
       fromDate.setDate(fromDate.getDate() - 30);
       const from = fromDate.toISOString().split('T')[0];
 
-      const [dash, tpRaw, ordersRes, prodsRes] = await Promise.allSettled([
+      const [dash, snapshotsRes, tpRaw, ordersRes, prodsRes] = await Promise.allSettled([
         getStoreDashboard(storeId, from, to),
+        getStoreSnapshots(storeId, 7),
         getTopProducts(storeId, 5),
         getStoreOrders(storeId, 1, 5),
         getStoreProducts(storeId, 1, 100),
       ]);
 
-      if (dash.status === 'fulfilled') setDashboard(dash.value as DashboardData);
+      if (dash.status === 'fulfilled') setDashboard(dash.value);
+      if (snapshotsRes.status === 'fulfilled') setSnapshots(snapshotsRes.value.data ?? []);
       if (tpRaw.status === 'fulfilled') {
-        // api.ts getTopProducts returns ApiProduct[]
         const v = tpRaw.value;
         setTopProducts(Array.isArray(v) ? v : (v as PaginatedResponse<ApiProduct>).data ?? []);
       }
@@ -220,28 +214,23 @@ export function BusinessDashboard() {
 
   // ── Derived values ──────────────────────────────────────────────────────────
 
-  // api.ts StoreDashboard uses: revenue, orders_count, visitor_count, orders_by_status
-  const revenue = ((dashboard?.revenue ?? dashboard?.total_revenue ?? 0) as number);
-  const ordersCount = ((dashboard?.orders_count ?? dashboard?.total_orders ?? 0) as number);
-  const activeProducts = ((dashboard?.total_products ?? dashboard?.active_products ?? allProducts.filter(p => p.stock_status !== 'out_of_stock').length) as number);
-  const visitors = ((dashboard?.visitor_count ?? dashboard?.visitors ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0) as number);
+  const revenue = dashboard?.revenue ?? 0;
+  const ordersCount = dashboard?.orders
+    ? Object.values(dashboard.orders).reduce((a, b) => a + b, 0)
+    : 0;
+  const activeProducts = dashboard?.active_products ?? allProducts.filter(p => p.is_active).length;
+  const visitors = dashboard?.visitors ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0;
 
   const lowStock = allProducts.filter(p => p.stock_status === 'low_stock').length;
   const outOfStock = allProducts.filter(p => p.stock_status === 'out_of_stock').length;
 
-  // api.ts StoreDashboard uses orders_by_status (not order_status_summary)
-  const statusSummary = (
-    (dashboard?.orders_by_status ?? dashboard?.order_status_summary) as Record<string, number> | undefined
-  ) ?? (() => {
+  const statusSummary: Record<string, number> = dashboard?.orders ?? (() => {
     const s: Record<string, number> = { pending: 0, processing: 0, shipped: 0, delivered: 0 };
     recentOrders.forEach(o => { if (o.status in s) s[o.status]++; });
     return s;
   })();
 
-  const chartData = buildRevenueChart(
-    dashboard?.revenue_by_day as { date: string; revenue: number }[] | undefined,
-    recentOrders
-  );
+  const chartData = buildRevenueChart(snapshots, recentOrders);
 
   // Use review_count as the ranking metric for the % bar (stock_quantity ≠ sales rank)
   const maxReviews = Math.max(...topProducts.map(p => p.review_count ?? 0), 1);
@@ -633,10 +622,10 @@ export function BusinessDashboard() {
               <div className="db-mini-card__title">Order Summary</div>
               <div className="db-order-summary-grid">
                 {[
-                  { key: 'pending',    label: 'Pending',    color: '#D97706' },
+                  { key: 'pending', label: 'Pending', color: '#D97706' },
                   { key: 'processing', label: 'Processing', color: '#2563EB' },
-                  { key: 'shipped',    label: 'Shipped',    color: '#059669' },
-                  { key: 'delivered',  label: 'Delivered',  color: '#16A34A' },
+                  { key: 'shipped', label: 'Shipped', color: '#059669' },
+                  { key: 'delivered', label: 'Delivered', color: '#16A34A' },
                 ].map(s => (
                   <div
                     key={s.key}

@@ -15,14 +15,13 @@ import {
   type ApiProduct,
   type ApiStore,
   type ApiCategory,
-  type PaginatedResponse,
 } from '../../services/api';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StockBadge({ status, qty }: { status: string; qty: number }) {
   const safeQty = qty ?? 0;
-  if (status === 'out_of_stock' || safeQty === 0)
+  if (status === 'out_of_stock' || status === 'reserved' || safeQty === 0)
     return <span className="inv-badge inv-badge--out">Out of Stock</span>;
   if (status === 'low_stock' || safeQty <= 5)
     return (
@@ -46,7 +45,7 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
 
 interface ProductFormData {
   name: string; description: string; price: string;
-  original_price: string; stock_quantity: string;
+  discount_price: string; stock_quantity: string;
   category_id: string; images: string;
 }
 
@@ -64,7 +63,7 @@ function ProductModal({
     name: product?.name ?? '',
     description: product?.description ?? '',
     price: product?.price ? String(product.price) : '',
-    original_price: product?.original_price ? String(product.original_price) : '',
+    discount_price: product?.discount_price ? String(product.discount_price) : '',
     stock_quantity: product?.stock_quantity ? String(product.stock_quantity) : '',
     category_id: product?.category?.id ?? (categories[0]?.id ?? ''),
     images: product?.images?.join(', ') ?? '',
@@ -87,7 +86,7 @@ function ProductModal({
         name: form.name.trim(),
         description: form.description.trim(),
         price: parseFloat(form.price),
-        original_price: form.original_price ? parseFloat(form.original_price) : undefined,
+        discount_price: form.discount_price ? parseFloat(form.discount_price) : undefined,
         stock_quantity: parseInt(form.stock_quantity, 10),
         category_id: form.category_id,
         images: form.images.split(',').map(s => s.trim()).filter(Boolean),
@@ -131,8 +130,8 @@ function ProductModal({
             </div>
 
             <div className="inv-field">
-              <label>Original Price (₦)</label>
-              <input type="number" value={form.original_price} onChange={set('original_price')} placeholder="0.00" min="0" />
+              <label>Discount Price (₦)</label>
+              <input type="number" value={form.discount_price} onChange={set('discount_price')} placeholder="0.00" min="0" />
             </div>
 
             <div className="inv-field">
@@ -196,9 +195,9 @@ export function BusinessInventory() {
           getMyStores(),
           fetchCategories({ limit: 100 }),
         ]);
-        const storeList = (storesRes as PaginatedResponse<ApiStore>).data ?? [];
+        const storeList = Array.isArray(storesRes) ? storesRes : (storesRes as { data?: ApiStore[] }).data ?? [];
         setStores(storeList);
-        setCategories((catsRes as PaginatedResponse<ApiCategory>).data ?? []);
+        setCategories(catsRes.data ?? []);
         const first = storeList[0]?.id;
         if (first) {
           setStoreId(first);
