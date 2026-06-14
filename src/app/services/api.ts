@@ -332,9 +332,7 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
     throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
   }
 
-  // Unwrap the standard { success, message, data[, meta] } envelope.
-  // For paginated responses the server sends { data: T[], meta: { total, page, limit } }.
-  // We reassemble that into the PaginatedResponse shape the callers expect.
+
   const envelope = json as Record<string, unknown>;
   if (envelope?.data !== undefined) {
     if (envelope.meta && typeof envelope.meta === 'object') {
@@ -385,7 +383,7 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
   return json as T;
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
+//  Auth 
 
 export const registerUser = (body: RegisterBody) =>
   publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
@@ -413,19 +411,19 @@ export const forgotPassword = (email: string) =>
 export const resetPassword = (body: { email: string; otp: string; password: string }) =>
   publicFetch<void>('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify(body) });
 
-// ─── Users ────────────────────────────────────────────────────────────────────
+//  Users 
 
 export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
 
 export const updateMe = (body: { name?: string; phone?: string; avatar?: string }) =>
   authFetch<AuthUser>('/api/v1/users/me', { method: 'PUT', body: JSON.stringify(body) });
 
-// ─── Categories ───────────────────────────────────────────────────────────────
+// Categories 
 
 export const fetchCategories = (params?: { search?: string; parent_id?: string; page?: number; limit?: number }) =>
   publicFetch<PaginatedResponse<ApiCategory>>(`/api/v1/categories${buildQuery(params)}`);
 
-// ─── Products ─────────────────────────────────────────────────────────────────
+//  Products 
 
 export const fetchProducts = (params?: {
   page?: number;
@@ -452,7 +450,7 @@ export const fetchProductById = async (id: string): Promise<ApiProduct> => {
   return res as ApiProduct;
 };
 
-// ─── Reviews ──────────────────────────────────────────────────────────────────
+//  Reviews 
 
 export const fetchProductReviews = (productId: string, page = 1, limit = 20) =>
   publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/products/${productId}${buildQuery({ page, limit })}`);
@@ -472,7 +470,7 @@ export const addStoreReview = (storeId: string, body: { rating: number; comment?
 export const deleteStoreReview = (reviewId: string) =>
   authFetch<void>(`/api/v1/reviews/stores/reviews/${reviewId}`, { method: 'DELETE' });
 
-// ─── Wishlist ─────────────────────────────────────────────────────────────────
+//  Wishlist 
 
 export const getWishlist = (page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
@@ -483,7 +481,7 @@ export const addToWishlist = (productId: string) =>
 export const removeFromWishlist = (productId: string) =>
   authFetch<{ message: string }>(`/api/v1/wishlists/${productId}`, { method: 'DELETE' });
 
-// ─── Orders ───────────────────────────────────────────────────────────────────
+//  Orders 
 
 export const checkout = (body: CheckoutBody) =>
   authFetch<{ orders: ApiOrder[]; payment_url?: string }>('/api/v1/orders/checkout', { method: 'POST', body: JSON.stringify(body) });
@@ -496,7 +494,7 @@ export const getOrder = (orderId: string) => authFetch<ApiOrder>(`/api/v1/orders
 export const cancelOrder = (orderId: string) =>
   authFetch<ApiOrder>(`/api/v1/orders/my/${orderId}/cancel`, { method: 'PATCH' });
 
-// ─── Businesses ───────────────────────────────────────────────────────────────
+//  Businesses 
 
 export const fetchFeaturedBusinesses = () => publicFetch<ApiBusiness[]>('/api/v1/businesses/featured');
 
@@ -505,7 +503,7 @@ export const getMyBusiness = () => authFetch<ApiBusiness>('/api/v1/businesses/my
 export const updateMyBusiness = (body: Partial<ApiBusiness>) =>
   authFetch<ApiBusiness>('/api/v1/businesses/my', { method: 'PUT', body: JSON.stringify(body) });
 
-// ─── Stores ───────────────────────────────────────────────────────────────────
+//  Stores 
 
 export const fetchPublicStores = (params?: {
   category_slug?: string;
@@ -547,7 +545,7 @@ export const logStoreVisit = (storeId: string) => {
     : publicFetch<void>(path, { method: 'POST' });
 };
 
-// ─── Analytics ────────────────────────────────────────────────────────────────
+//  Analytics 
 
 export const getStoreDashboard = (storeId: string, from?: string, to?: string) =>
   authFetch<StoreDashboard>(`/api/v1/analytics/stores/${storeId}/dashboard${buildQuery({ from, to })}`);
@@ -558,7 +556,7 @@ export const getStoreSnapshots = (storeId: string, limit = 7) =>
 export const getTopProducts = (storeId: string, limit = 10) =>
   authFetch<ApiProduct[]>(`/api/v1/analytics/stores/${storeId}/top-products${buildQuery({ limit })}`);
 
-// ─── Wallet ───────────────────────────────────────────────────────────────────
+//  Wallet 
 
 export const getWallet = () => authFetch<Wallet>('/api/v1/wallet');
 
@@ -573,7 +571,7 @@ export const withdraw = (amount: number) =>
     method: 'POST', body: JSON.stringify({ amount }),
   });
 
-// ─── Seller products ──────────────────────────────────────────────────────────
+//    Seller products
 
 export const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -596,7 +594,7 @@ export const updateProduct = (storeId: string, productId: string, body: Partial<
 export const deleteProduct = (storeId: string, productId: string) =>
   authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
 
-// ─── Seller orders ────────────────────────────────────────────────────────────
+//  Seller orders 
 
 export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiOrder>>(`/api/v1/orders/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -604,7 +602,7 @@ export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
 export const updateOrderStatus = (orderId: string, status: 'processing' | 'shipped' | 'delivered' | 'cancelled') =>
   authFetch<ApiOrder>(`/api/v1/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
 
-// ─── KYC ──────────────────────────────────────────────────────────────────────
+//  KYC 
 
 export const submitKyc = (body: { document_type: string; document_url: string; owner_type?: string; owner_id?: string }) =>
   authFetch<KycSubmission>('/api/v1/kyc', { method: 'POST', body: JSON.stringify(body) });
@@ -612,7 +610,7 @@ export const submitKyc = (body: { document_type: string; document_url: string; o
 export const getMyKyc = (page = 1, limit = 20) =>
   authFetch<PaginatedResponse<KycSubmission>>(`/api/v1/kyc/my${buildQuery({ page, limit })}`);
 
-// ─── Gigs ─────────────────────────────────────────────────────────────────────
+//  Gigs 
 
 export const fetchPublicGigs = (city?: string) => publicFetch<ApiGig[]>(`/api/v1/gigs${buildQuery({ city })}`);
 export const getGig = (gigId: string) => publicFetch<ApiGig>(`/api/v1/gigs/${gigId}`);
@@ -629,7 +627,7 @@ export const cancelGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gi
 export const getMyCreatedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
 export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/assigned${buildQuery({ page, limit })}`);
 
-// ─── Map ApiProduct → local Product ──────────────────────────────────────────
+//  Map ApiProduct → local Product 
 
 export function mapApiProduct(p: ApiProduct): Product {
   const effectivePrice = p.discount_price ?? p.price;
