@@ -124,7 +124,8 @@ export function BusinessStorefront() {
         fetchCategories({ limit: 50 }),
       ]);
 
-      const firstStore = storeRes.data[0] ?? null;
+      const storeList = Array.isArray(storeRes) ? storeRes : (storeRes as { data?: ApiStore[] }).data ?? [];
+      const firstStore = storeList[0] ?? null;
       setStore(firstStore);
       setCategories(catRes.data);
 
@@ -133,8 +134,10 @@ export function BusinessStorefront() {
           store_name: firstStore.store_name ?? '',
           description: firstStore.description ?? '',
           city: firstStore.city ?? '',
-          category_id: firstStore.category?.id ?? '',
-          logo: firstStore.logo ?? '',
+          category_id: typeof firstStore.category === 'string'
+            ? (catRes.data ?? []).find(c => c.name === firstStore.category)?.id ?? ''
+            : (firstStore.category as import('../../services/api').ApiCategory | undefined)?.id ?? '',
+          logo: firstStore.logo_url ?? '',
           cover_image: (firstStore as any).cover_image ?? '',
         };
         setForm(initial);
@@ -182,14 +185,15 @@ export function BusinessStorefront() {
     setSaving(true);
     setSaveError(null);
     try {
-      const payload: Partial<ApiStore> = {
+      const selectedCat = categories.find(c => c.id === form.category_id);
+      const payload = {
         store_name: form.store_name,
         description: form.description,
         city: form.city,
-        logo: form.logo,
-        ...(form.category_id ? { category: { id: form.category_id } as any } : {}),
+        logo_url: form.logo,
+        ...(selectedCat ? { category_slug: selectedCat.slug } : {}),
       };
-      const updated = await updateStore(store.id, payload);
+      const updated = await updateStore(store.id, payload as any);
       setStore(updated);
       setOriginalForm(form);
       setIsDirty(false);

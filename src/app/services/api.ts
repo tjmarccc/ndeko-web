@@ -60,6 +60,13 @@ export interface AuthTokens {
   refresh_token: string;
 }
 
+export enum UserRole {
+  BUYER = 'buyer',
+  SELLER = 'seller',
+  DISPATCHER = 'dispatcher',
+  ADMIN = 'admin',
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -88,6 +95,8 @@ export interface ApiCategory {
   name: string;
   slug: string;
   parent_id?: string | null;
+  description?: string;
+  icon_url?: string;
   created_at?: string;
 }
 
@@ -96,10 +105,10 @@ export interface ApiProduct {
   name: string;
   description: string;
   price: number;
-  original_price?: number;
-  discount?: number | null;
+  discount_price?: number | null;
   stock_quantity: number;
-  stock_status: 'in_stock' | 'out_of_stock' | 'low_stock';
+  total_sold?: number;
+  stock_status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'reserved';
   images: string[];
   sku: string;
   is_active: boolean;
@@ -121,13 +130,25 @@ export interface ApiBusiness {
 
 export interface ApiStore {
   id: string;
+  business_id?: string;
   store_name: string;
   store_slug: string;
+  store_tagline?: string;
+  /** String name (current API) or full object when the join is populated */
+  category?: string | ApiCategory;
   description?: string;
-  logo?: string;
   city?: string;
-  category?: ApiCategory;
-  status: string;
+  state?: string;
+  country?: string;
+  contact_phone?: string;
+  contact_email?: string;
+  whatsapp_number?: string;
+  logo_url?: string;
+  banner_url?: string;
+  delivery_fee?: number | string;
+  return_policy?: string;
+  shipping_policy?: string;
+  status: 'active' | 'inactive' | 'suspended';
   average_rating?: number;
   visitor_count?: number;
 }
@@ -141,6 +162,8 @@ export interface ApiOrder {
   payment_url?: string;
   total_amount: number;
   created_at: string;
+  buyer?: { first_name: string; last_name: string };
+  items?: { product_name: string; quantity: number; unit_price: number }[];
 }
 
 export interface CheckoutBody {
@@ -175,10 +198,18 @@ export interface WalletTransaction {
 
 export interface StoreDashboard {
   revenue: number;
+  orders: Record<string, number>;
+  visitors: number;
+  active_products: number;
+}
+
+export interface StoreSnapshot {
+  snapshot_date: string;
+  revenue: number;
   orders_count: number;
-  orders_by_status: Record<string, number>;
-  visitor_count: number;
-  period: { from: string; to: string };
+  visitors_count: number;
+  active_products_count: number;
+  avg_order_value: number;
 }
 
 export interface ApiReview {
@@ -211,8 +242,8 @@ export interface KycSubmission {
 }
 
 export type RegisterBody =
-  | { first_name: string; last_name: string; email: string; password: string; role: 'buyer' | 'seller' }
-  | { first_name: string; last_name: string; email: string; password: string; role: 'seller'; business_name: string };
+  | { first_name: string; last_name: string; email: string; password: string; role: UserRole.BUYER | UserRole.SELLER }
+  | { first_name: string; last_name: string; email: string; password: string; role: UserRole.SELLER; business_name: string };
 
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
@@ -396,7 +427,17 @@ export const fetchCategories = (params?: { search?: string; parent_id?: string; 
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 
-export const fetchProducts = (params?: { page?: number; limit?: number; category?: string }) =>
+export const fetchProducts = (params?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  category_id?: string;
+  category_slug?: string;
+  store_id?: string;
+  min_price?: number;
+  max_price?: number;
+  in_stock?: boolean;
+}) =>
   publicFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products${buildQuery(params)}`);
 
 export const fetchProductById = async (id: string): Promise<ApiProduct> => {
@@ -467,16 +508,36 @@ export const updateMyBusiness = (body: Partial<ApiBusiness>) =>
 // ─── Stores ───────────────────────────────────────────────────────────────────
 
 export const fetchPublicStores = (params?: {
-  city?: string; category?: string; slug?: string; status?: string; page?: number; limit?: number;
+  category_slug?: string;
+  city?: string;
+  slug?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
 }) =>
-  publicFetch<PaginatedResponse<ApiStore>>(`/api/v1/stores/public${buildQuery(params)}`);
+  publicFetch<ApiStore[]>(`/api/v1/stores/public${buildQuery(params)}`);
 
-export const getMyStores = () => authFetch<PaginatedResponse<ApiStore>>('/api/v1/stores/my');
+export const getMyStores = () => authFetch<ApiStore[]>('/api/v1/stores/my');
 
-export const createStore = (body: { store_name: string; city: string; category: string }) =>
+export type StoreBody = {
+  store_name: string;
+  store_tagline?: string;
+  category_slug?: string;
+  description?: string;
+  city?: string;
+  state?: string;
+  contact_phone?: string;
+  contact_email?: string;
+  whatsapp_number?: string;
+  return_policy?: string;
+  shipping_policy?: string;
+  delivery_fee?: number;
+};
+
+export const createStore = (body: StoreBody) =>
   authFetch<ApiStore>('/api/v1/stores', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateStore = (storeId: string, body: Partial<ApiStore>) =>
+export const updateStore = (storeId: string, body: Partial<StoreBody>) =>
   authFetch<ApiStore>(`/api/v1/stores/${storeId}`, { method: 'PUT', body: JSON.stringify(body) });
 
 export const logStoreVisit = (storeId: string) => {
@@ -491,8 +552,8 @@ export const logStoreVisit = (storeId: string) => {
 export const getStoreDashboard = (storeId: string, from?: string, to?: string) =>
   authFetch<StoreDashboard>(`/api/v1/analytics/stores/${storeId}/dashboard${buildQuery({ from, to })}`);
 
-export const getStoreSnapshots = (storeId: string) =>
-  authFetch<PaginatedResponse<Record<string, unknown>>>(`/api/v1/analytics/stores/${storeId}/snapshots`);
+export const getStoreSnapshots = (storeId: string, limit = 7) =>
+  authFetch<PaginatedResponse<StoreSnapshot>>(`/api/v1/analytics/stores/${storeId}/snapshots${buildQuery({ limit })}`);
 
 export const getTopProducts = (storeId: string, limit = 10) =>
   authFetch<ApiProduct[]>(`/api/v1/analytics/stores/${storeId}/top-products${buildQuery({ limit })}`);
@@ -518,8 +579,14 @@ export const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products/stores/${storeId}${buildQuery({ page, limit })}`);
 
 export const createProduct = (storeId: string, body: {
-  name: string; description: string; price: number; original_price?: number;
-  stock_quantity: number; category_id: string; images: string[];
+  name: string;
+  description?: string;
+  price: number;
+  discount_price?: number;
+  cost_price?: number;
+  stock_quantity: number;
+  category_id?: string;
+  images?: string[];
 }) =>
   authFetch<ApiProduct>(`/api/v1/products/stores/${storeId}`, { method: 'POST', body: JSON.stringify(body) });
 
@@ -553,30 +620,33 @@ export const getGig = (gigId: string) => publicFetch<ApiGig>(`/api/v1/gigs/${gig
 export const createGig = (body: { title: string; description: string; city: string; fee: number }) =>
   authFetch<ApiGig>('/api/v1/gigs', { method: 'POST', body: JSON.stringify(body) });
 
-export const listGig    = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/list`,    { method: 'PATCH' });
-export const acceptGig  = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/accept`,  { method: 'PATCH' });
-export const startGig   = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/start`,   { method: 'PATCH' });
+export const listGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/list`, { method: 'PATCH' });
+export const acceptGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/accept`, { method: 'PATCH' });
+export const startGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/start`, { method: 'PATCH' });
 export const deliverGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/deliver`, { method: 'PATCH' });
-export const cancelGig  = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/cancel`,  { method: 'PATCH' });
+export const cancelGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/cancel`, { method: 'PATCH' });
 
-export const getMyCreatedGigs  = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
+export const getMyCreatedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
 export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/assigned${buildQuery({ page, limit })}`);
 
 // ─── Map ApiProduct → local Product ──────────────────────────────────────────
 
 export function mapApiProduct(p: ApiProduct): Product {
+  const effectivePrice = p.discount_price ?? p.price;
   return {
     id: p.id,
     name: p.name,
-    price: p.price,
-    originalPrice: p.original_price,
+    price: effectivePrice,
+    originalPrice: p.discount_price ? p.price : undefined,
     image: p.images?.[0] || '/images/product-placeholder.webp',
     category: p.category?.slug ?? p.category?.id ?? '',
     rating: p.average_rating ?? 0,
     reviews: p.review_count ?? 0,
     description: p.description,
     brand: p.store?.store_name ?? '',
-    inStock: p.stock_status === 'in_stock' || p.stock_status === 'low_stock',
-    discount: p.discount ?? undefined,
+    inStock: ['in_stock', 'low_stock'].includes(p.stock_status),
+    discount: p.discount_price
+      ? Math.round((1 - p.discount_price / p.price) * 100)
+      : undefined,
   };
 }

@@ -124,7 +124,7 @@ const PREF_DEFS = [
 function StoreProfileSection() {
   const [store, setStore]         = useState<ApiStore | null>(null);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
-  const [form, setForm]           = useState({ store_name: '', description: '', city: '', category_id: '', logo: '' });
+  const [form, setForm]           = useState({ store_name: '', description: '', city: '', category_id: '', logo_url: '' });
   const [original, setOriginal]   = useState(form);
   const [loading, setLoading]     = useState(true);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -134,10 +134,14 @@ function StoreProfileSection() {
     setLoading(true); setError(null);
     try {
       const [storeRes, catRes] = await Promise.all([getMyStores(), fetchCategories({ limit: 50 })]);
-      const s = storeRes.data[0] ?? null;
+      const storeList = Array.isArray(storeRes) ? storeRes : (storeRes as { data?: ApiStore[] }).data ?? [];
+      const s = storeList[0] ?? null;
       setStore(s); setCategories(catRes.data);
       if (s) {
-        const f = { store_name: s.store_name ?? '', description: s.description ?? '', city: s.city ?? '', category_id: s.category?.id ?? '', logo: s.logo ?? '' };
+        const catId = typeof s.category === 'string'
+          ? catRes.data.find(c => c.name === s.category)?.id ?? ''
+          : (s.category as import('../../services/api').ApiCategory | undefined)?.id ?? '';
+        const f = { store_name: s.store_name ?? '', description: s.description ?? '', city: s.city ?? '', category_id: catId, logo_url: s.logo_url ?? '' };
         setForm(f); setOriginal(f);
       }
     } catch { setError('Failed to load store data.'); }
@@ -154,8 +158,14 @@ function StoreProfileSection() {
     if (!store) return;
     setSaveState('saving');
     try {
-      const catObj = form.category_id ? { id: form.category_id } as any : undefined;
-      const updated = await updateStore(store.id, { store_name: form.store_name, description: form.description, city: form.city, logo: form.logo, ...(catObj ? { category: catObj } : {}) });
+      const selectedCat = categories.find(c => c.id === form.category_id);
+      const updated = await updateStore(store.id, {
+        store_name: form.store_name,
+        description: form.description,
+        city: form.city,
+        logo_url: form.logo_url_url,
+        ...(selectedCat ? { category_slug: selectedCat.slug } : {}),
+      } as any);
       setStore(updated); setOriginal(form);
       setSaveState('saved'); setTimeout(() => setSaveState('idle'), 2200);
     } catch { setSaveState('error'); setTimeout(() => setSaveState('idle'), 2500); }
@@ -177,15 +187,15 @@ function StoreProfileSection() {
       <div className="flex flex-col xs:flex-row items-start xs:items-center gap-4 mb-5 pb-5 border-b border-gray-100 dark:border-gray-700">
         <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden flex-shrink-0"
           style={{ background: 'linear-gradient(135deg,#8B1538,#D4828F)' }}>
-          {form.logo
-            ? <img src={form.logo} alt={form.store_name} className="w-full h-full object-cover" onError={e => (e.currentTarget.style.display='none')} />
+          {form.logo_url
+            ? <img src={form.logo_url} alt={form.store_name} className="w-full h-full object-cover" onError={e => (e.currentTarget.style.display='none')} />
             : initials}
         </div>
         <div className="flex-1">
           <p className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Store Logo</p>
           <p className="text-xs text-gray-400 mb-2">Paste an image URL below to update your logo.</p>
           <input
-            type="url" value={form.logo} onChange={set('logo')}
+            type="url" value={form.logo_url} onChange={set('logo')}
             placeholder="https://…"
             className={`${inputCls} text-xs`}
           />

@@ -8,6 +8,7 @@ import {
   getStoreOrders,
   updateOrderStatus,
   type ApiOrder,
+  type ApiStore,
 } from '../../services/api';
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -84,7 +85,6 @@ function OrderDetailModal({
   onClose: () => void;
   onStatusUpdate: (id: string, status: NextStatus) => Promise<void>;
 }) {
-  const cfg = STATUS_CFG[order.status] ?? STATUS_CFG.pending;
   const next = NEXT_STATUS[order.status];
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -264,7 +264,8 @@ export function BusinessOrders() {
       let sid = storeId;
       if (!sid) {
         const res = await getMyStores();
-        sid = res.data[0]?.id ?? null;
+        const storeList = Array.isArray(res) ? res : (res as { data?: ApiStore[] }).data ?? [];
+        sid = storeList[0]?.id ?? null;
         if (sid) setStoreId(sid);
       }
       if (!sid) throw new Error('No store found for this account.');

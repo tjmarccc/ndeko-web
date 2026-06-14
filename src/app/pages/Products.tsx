@@ -112,7 +112,7 @@ export function Products() {
           page,
           limit: PAGE_SIZE,
         };
-        if (selectedCategory !== 'all') params.category = selectedCategory;
+        if (selectedCategory !== 'all') params.category_slug = selectedCategory;
 
         const res = await fetchProducts(params);
 
