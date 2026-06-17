@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
+import * as SliderPrimitive from '@radix-ui/react-slider';
 import { ProductCard } from '../components/ProductCard';
 import { Button } from '../components/ui/button';
 import { Checkbox } from '../components/ui/checkbox';
@@ -36,7 +37,15 @@ function SkeletonCard() {
   );
 }
 
-// ─── Custom dual-thumb price range slider ─────────────────────────────────────
+// ─── Dual-thumb price range slider (Radix-backed) ─────────────────────────────
+//
+// Built on @radix-ui/react-slider instead of hand-rolled mouse listeners.
+// Radix uses native pointer capture internally, so it can't "lose" the thumb
+// mid-drag the way a window-level mousemove/mouseup pair can on fast moves,
+// touch devices, or when the cursor leaves the track bounds.
+//
+// - onValueChange fires continuously while dragging -> purely visual (priceRange)
+// - onValueCommit fires once, on release           -> drives the actual fetch (committedPrice)
 
 function PriceRangeSlider({
   value,
@@ -53,112 +62,29 @@ function PriceRangeSlider({
   max: number;
   step: number;
 }) {
-  const trackRef = useRef<HTMLDivElement>(null);
-
-  const pct = (v: number) => ((v - min) / (max - min)) * 100;
-
-  function valFromX(clientX: number) {
-    const rect = trackRef.current!.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const raw = min + ratio * (max - min);
-    return Math.round(raw / step) * step;
-  }
-
-  function makeDragHandler(isMin: boolean) {
-    return (eDown: React.MouseEvent | React.TouchEvent) => {
-      eDown.preventDefault();
-
-      const startLo = value[0];
-      const startHi = value[1];
-      // Track latest value so onCommit gets the final position on mouse up
-      let latest: [number, number] = [startLo, startHi];
-
-      const onMove = (e: MouseEvent | TouchEvent) => {
-        const cx = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
-        const v = valFromX(cx);
-        if (isMin) {
-          latest = [Math.max(min, Math.min(v, startHi - step)), startHi];
-        } else {
-          latest = [startLo, Math.min(max, Math.max(v, startLo + step))];
-        }
-        onChange(latest); // visual-only update while dragging
-      };
-
-      const onUp = () => {
-        onCommit(latest); // trigger fetch only when user releases
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        window.removeEventListener('touchmove', onMove);
-        window.removeEventListener('touchend', onUp);
-      };
-
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      window.addEventListener('touchmove', onMove, { passive: false });
-      window.addEventListener('touchend', onUp);
-    };
-  }
-
-  const loP = pct(value[0]);
-  const hiP = pct(value[1]);
-
   return (
-    <div
-      ref={trackRef}
-      className="relative h-6 flex items-center my-3 select-none"
+    <SliderPrimitive.Root
+      className="relative flex items-center w-full h-6 my-3 select-none touch-none"
+      min={min}
+      max={max}
+      step={step}
+      minStepsBetweenThumbs={1}
+      value={value}
+      onValueChange={(v) => onChange(v as [number, number])}
+      onValueCommit={(v) => onCommit(v as [number, number])}
     >
-      {/* Base track */}
-      <div className="absolute inset-x-0 h-1.5 rounded-full bg-gray-200 dark:bg-gray-600" />
-      {/* Filled range */}
-      <div
-        className="absolute h-1.5 rounded-full bg-[#8B1538]"
-        style={{ left: `${loP}%`, width: `${hiP - loP}%` }}
-      />
-      {/* Min thumb */}
-      <div
-        className="absolute w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 -translate-x-1/2"
-        style={{ left: `${loP}%` }}
-        onMouseDown={makeDragHandler(true)}
-        onTouchStart={makeDragHandler(true)}
-        role="slider"
+      <SliderPrimitive.Track className="relative h-1.5 w-full grow rounded-full bg-gray-200 dark:bg-gray-600">
+        <SliderPrimitive.Range className="absolute h-full rounded-full bg-[#8B1538]" />
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb
+        className="block w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8B1538]/50"
         aria-label="Minimum price"
-        aria-valuenow={value[0]}
-        aria-valuemin={min}
-        aria-valuemax={value[1]}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          const next: [number, number] =
-            e.key === 'ArrowRight'
-              ? [Math.min(value[0] + step, value[1] - step), value[1]]
-              : e.key === 'ArrowLeft'
-              ? [Math.max(value[0] - step, min), value[1]]
-              : value;
-          if (next !== value) { onChange(next); onCommit(next); }
-        }}
       />
-      {/* Max thumb */}
-      <div
-        className="absolute w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 -translate-x-1/2"
-        style={{ left: `${hiP}%` }}
-        onMouseDown={makeDragHandler(false)}
-        onTouchStart={makeDragHandler(false)}
-        role="slider"
+      <SliderPrimitive.Thumb
+        className="block w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8B1538]/50"
         aria-label="Maximum price"
-        aria-valuenow={value[1]}
-        aria-valuemin={value[0]}
-        aria-valuemax={max}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          const next: [number, number] =
-            e.key === 'ArrowRight'
-              ? [value[0], Math.min(value[1] + step, max)]
-              : e.key === 'ArrowLeft'
-              ? [value[0], Math.max(value[1] - step, value[0] + step)]
-              : value;
-          if (next !== value) { onChange(next); onCommit(next); }
-        }}
       />
-    </div>
+    </SliderPrimitive.Root>
   );
 }
 
@@ -171,9 +97,9 @@ export function Products() {
 
   // ── Filter / sort state ──
   const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam || 'all');
-  // priceRange: visual position of thumbs (updates on every mouse move)
+  // priceRange: visual position of thumbs (updates on every drag move)
   const [priceRange, setPriceRange] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
-  // committedPrice: only updates on mouse/touch release — this drives the fetch
+  // committedPrice: only updates on release — this drives the fetch
   const [committedPrice, setCommittedPrice] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
   const [sortBy, setSortBy] = useState('featured');
   const [filterOpen, setFilterOpen] = useState(true);
