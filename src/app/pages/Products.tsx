@@ -148,6 +148,7 @@ export function Products() {
 
   const setSelectedCategory = useCallback(
     (value: string) => {
+      console.log('[DEBUG] setSelectedCategory called with:', value); // TEMP DEBUG — remove after testing
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         if (value === 'all') {
@@ -155,6 +156,7 @@ export function Products() {
         } else {
           next.set('category', value);
         }
+        console.log('[DEBUG] next search params:', next.toString()); // TEMP DEBUG — remove after testing
         return next;
       });
     },
@@ -326,7 +328,10 @@ export function Products() {
           <div className="space-y-1 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
             <button
               type="button"
-              onClick={() => setSelectedCategory('all')}
+              onClick={() => {
+                console.log('[DEBUG] All Categories button clicked'); // TEMP DEBUG — remove after testing
+                setSelectedCategory('all');
+              }}
               aria-pressed={selectedCategory === 'all'}
               className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
                 selectedCategory === 'all'
