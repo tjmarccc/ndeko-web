@@ -148,7 +148,7 @@ export function Products() {
 
   const setSelectedCategory = useCallback(
     (value: string) => {
-      console.log('[DEBUG] setSelectedCategory called with:', value); // TEMP DEBUG — remove after testing
+      alert('setSelectedCategory called with: ' + value); // TEMP DEBUG — remove after testing
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         if (value === 'all') {
@@ -156,7 +156,6 @@ export function Products() {
         } else {
           next.set('category', value);
         }
-        console.log('[DEBUG] next search params:', next.toString()); // TEMP DEBUG — remove after testing
         return next;
       });
     },
@@ -329,7 +328,7 @@ export function Products() {
             <button
               type="button"
               onClick={() => {
-                console.log('[DEBUG] All Categories button clicked'); // TEMP DEBUG — remove after testing
+                alert('All Categories clicked'); // TEMP DEBUG — remove after testing
                 setSelectedCategory('all');
               }}
               aria-pressed={selectedCategory === 'all'}
@@ -568,4 +567,4 @@ export function Products() {
       </div>
     </div>
   );
-};
+}
