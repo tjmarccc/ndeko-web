@@ -1,10 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
-import * as SliderPrimitive from '@radix-ui/react-slider';
 import { ProductCard } from '../components/ProductCard';
 import { Button } from '../components/ui/button';
-import { Checkbox } from '../components/ui/checkbox';
 import { Label } from '../components/ui/label';
+import { Input } from '../components/ui/input';
 import { SlidersHorizontal, ChevronLeft, ChevronRight, X, Loader2, AlertCircle } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import {
@@ -37,54 +36,100 @@ function SkeletonCard() {
   );
 }
 
-// ─── Dual-thumb price range slider (Radix-backed) ─────────────────────────────
+// ─── Min / Max price inputs ────────────────────────────────────────────────────
 //
-// Built on @radix-ui/react-slider instead of hand-rolled mouse listeners.
-// Radix uses native pointer capture internally, so it can't "lose" the thumb
-// mid-drag the way a window-level mousemove/mouseup pair can on fast moves,
-// touch devices, or when the cursor leaves the track bounds.
-//
-// - onValueChange fires continuously while dragging -> purely visual (priceRange)
-// - onValueCommit fires once, on release           -> drives the actual fetch (committedPrice)
+// Replaces the old dual-thumb slider. Each box holds local "draft" text state so
+// the user can freely type/clear/backspace without fighting a parsed number on
+// every keystroke. Values are parsed + clamped + committed only on blur or Enter,
+// which keeps re-renders of the product grid out of the typing path entirely.
 
-function PriceRangeSlider({
-  value,
-  onChange,
+function PriceRangeInputs({
+  committedMin,
+  committedMax,
   onCommit,
   min,
   max,
-  step,
 }: {
-  value: [number, number];
-  onChange: (v: [number, number]) => void;
-  onCommit: (v: [number, number]) => void;
+  committedMin: number;
+  committedMax: number;
+  onCommit: (range: [number, number]) => void;
   min: number;
   max: number;
-  step: number;
 }) {
+  const [minDraft, setMinDraft] = useState(String(committedMin));
+  const [maxDraft, setMaxDraft] = useState(String(committedMax));
+
+  // Keep drafts in sync if committed values change from outside (e.g. Clear Filters)
+  useEffect(() => {
+    setMinDraft(String(committedMin));
+  }, [committedMin]);
+
+  useEffect(() => {
+    setMaxDraft(String(committedMax));
+  }, [committedMax]);
+
+  const commit = () => {
+    let parsedMin = parseInt(minDraft.replace(/[^0-9]/g, ''), 10);
+    let parsedMax = parseInt(maxDraft.replace(/[^0-9]/g, ''), 10);
+
+    if (Number.isNaN(parsedMin)) parsedMin = min;
+    if (Number.isNaN(parsedMax)) parsedMax = max;
+
+    parsedMin = Math.min(Math.max(parsedMin, min), max);
+    parsedMax = Math.min(Math.max(parsedMax, min), max);
+
+    // Don't allow min > max — swap or clamp so min always <= max
+    if (parsedMin > parsedMax) {
+      [parsedMin, parsedMax] = [parsedMax, parsedMin];
+    }
+
+    setMinDraft(String(parsedMin));
+    setMaxDraft(String(parsedMax));
+    onCommit([parsedMin, parsedMax]);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
   return (
-    <SliderPrimitive.Root
-      className="relative flex items-center w-full h-6 my-3 select-none touch-none"
-      min={min}
-      max={max}
-      step={step}
-      minStepsBetweenThumbs={1}
-      value={value}
-      onValueChange={(v) => onChange(v as [number, number])}
-      onValueCommit={(v) => onCommit(v as [number, number])}
-    >
-      <SliderPrimitive.Track className="relative h-1.5 w-full grow rounded-full bg-gray-200 dark:bg-gray-600">
-        <SliderPrimitive.Range className="absolute h-full rounded-full bg-[#8B1538]" />
-      </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb
-        className="block w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8B1538]/50"
-        aria-label="Minimum price"
-      />
-      <SliderPrimitive.Thumb
-        className="block w-5 h-5 rounded-full bg-white border-2 border-[#8B1538] shadow-md cursor-grab active:cursor-grabbing active:scale-110 transition-transform z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8B1538]/50"
-        aria-label="Maximum price"
-      />
-    </SliderPrimitive.Root>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 min-w-0">
+        <Label htmlFor="price-min" className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
+          Min (₦)
+        </Label>
+        <Input
+          id="price-min"
+          type="text"
+          inputMode="numeric"
+          value={minDraft}
+          onChange={(e) => setMinDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={handleKeyDown}
+          placeholder={String(min)}
+          className="text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+        />
+      </div>
+      <span className="text-gray-400 dark:text-gray-500 mt-5">–</span>
+      <div className="flex-1 min-w-0">
+        <Label htmlFor="price-max" className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
+          Max (₦)
+        </Label>
+        <Input
+          id="price-max"
+          type="text"
+          inputMode="numeric"
+          value={maxDraft}
+          onChange={(e) => setMaxDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={handleKeyDown}
+          placeholder={String(max)}
+          className="text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -97,9 +142,7 @@ export function Products() {
 
   // ── Filter / sort state ──
   const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam || 'all');
-  // priceRange: visual position of thumbs (updates on every drag move)
-  const [priceRange, setPriceRange] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
-  // committedPrice: only updates on release — this drives the fetch
+  // committedPrice: the actual applied filter, only updates when the user blurs/Enters a box
   const [committedPrice, setCommittedPrice] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
   const [sortBy, setSortBy] = useState('featured');
   const [filterOpen, setFilterOpen] = useState(true);
@@ -155,7 +198,7 @@ export function Products() {
         if ('data' in res) {
           const mapped = res.data.map(mapApiProduct);
 
-          // Filter by committedPrice (only changes on drag release)
+          // Filter by committedPrice (only changes when user commits min/max box)
           const priceFiltered = mapped.filter(
             (p) => (p.price ?? 0) >= committedPrice[0] && (p.price ?? 0) <= committedPrice[1]
           );
@@ -185,7 +228,7 @@ export function Products() {
         setLoadingMore(false);
       }
     },
-    [selectedCategory, committedPrice, searchQuery] // committedPrice, not priceRange
+    [selectedCategory, committedPrice, searchQuery]
   );
 
   // Re-fetch when filters/search change
@@ -229,7 +272,6 @@ export function Products() {
   // ── Reset helpers ──
   const clearFilters = () => {
     setSelectedCategory('all');
-    setPriceRange([MIN_PRICE, MAX_PRICE]);
     setCommittedPrice([MIN_PRICE, MAX_PRICE]);
     setMobileFilterOpen(false);
   };
@@ -255,74 +297,67 @@ export function Products() {
         </button>
       </div>
 
-      {/* Categories */}
+      {/* Categories — plain button list, each one independently sets selectedCategory.
+          "All Categories" is just another option in the same list/group, so there's
+          no special-cased toggle logic that can silently no-op. */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Categories</h3>
         {catLoading ? (
           <div className="space-y-2">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-5 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+              <div key={i} className="h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="cat-all"
-                checked={selectedCategory === 'all'}
-                onCheckedChange={() => setSelectedCategory('all')}
-              />
-              <Label htmlFor="cat-all" className="cursor-pointer dark:text-gray-300">
-                All Categories
-              </Label>
-            </div>
-            {categories.map((cat) => (
-              <div key={cat.id} className="flex items-center gap-2">
-                <Checkbox
-                  id={`cat-${cat.id}`}
-                  checked={selectedCategory === cat.id || selectedCategory === cat.slug}
-                  onCheckedChange={() =>
-                    setSelectedCategory(
-                      selectedCategory === cat.id || selectedCategory === cat.slug
-                        ? 'all'
-                        : cat.slug ?? cat.id
-                    )
-                  }
-                />
-                <Label
-                  htmlFor={`cat-${cat.id}`}
-                  className="cursor-pointer dark:text-gray-300 capitalize"
+          <div className="space-y-1 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('all')}
+              aria-pressed={selectedCategory === 'all'}
+              className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
+                selectedCategory === 'all'
+                  ? 'bg-[#FDF2F4] dark:bg-[#8B1538]/30 text-[#8B1538] dark:text-[#F5A3B3] font-semibold'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300'
+              }`}
+            >
+              All Categories
+            </button>
+            {categories.map((cat) => {
+              const value = cat.slug ?? cat.id;
+              const isSelected = selectedCategory === cat.id || selectedCategory === cat.slug;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setSelectedCategory(value)}
+                  aria-pressed={isSelected}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm capitalize transition-colors ${
+                    isSelected
+                      ? 'bg-[#FDF2F4] dark:bg-[#8B1538]/30 text-[#8B1538] dark:text-[#F5A3B3] font-semibold'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300'
+                  }`}
                 >
                   {cat.name}
-                </Label>
-              </div>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Price range */}
+      {/* Price range — two number boxes instead of a slider */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Price Range</h3>
-        <PriceRangeSlider
-          value={priceRange}
-          onChange={setPriceRange}
+        <PriceRangeInputs
+          committedMin={committedPrice[0]}
+          committedMax={committedPrice[1]}
           onCommit={setCommittedPrice}
           min={MIN_PRICE}
           max={MAX_PRICE}
-          step={1000}
         />
-        <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300 mt-1">
-          <span>₦{priceRange[0].toLocaleString()}</span>
-          <span>₦{priceRange[1].toLocaleString()}</span>
-        </div>
-        {/* Show indicator only while thumb is dragged but not yet committed */}
-        {(priceRange[0] !== committedPrice[0] || priceRange[1] !== committedPrice[1]) && (
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Release to apply…
-          </p>
-        )}
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
+          Press Enter or click away to apply
+        </p>
       </div>
 
       <Button

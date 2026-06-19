@@ -83,6 +83,41 @@ export interface AuthUser {
   phone?: string;
 }
 
+// ─── Account security / addresses / notifications / payment methods ───────────
+// (Backend endpoints for these may not exist yet — see functions below.)
+
+export interface Address {
+  id: string;
+  label: string;          // e.g. "Home", "Office"
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  is_default: boolean;
+}
+
+export type AddressBody = Omit<Address, 'id'>;
+
+export interface NotificationPreferences {
+  order_updates: boolean;
+  deals: boolean;
+  wishlist: boolean;
+  newsletter: boolean;
+  sms: boolean;
+}
+
+export interface SavedPaymentMethod {
+  id: string;
+  card_type: string;        // 'visa' | 'mastercard' | 'verve' | ...
+  last_four: string;
+  cardholder_name: string;
+  expiry: string;            // 'MM/YY'
+  is_default: boolean;
+  /** Paystack (or other gateway) authorization code used to charge this card later */
+  authorization_code?: string;
+}
+
 export interface AuthResponse {
   user: AuthUser;
   tokens: AuthTokens;
@@ -417,6 +452,86 @@ export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
 
 export const updateMe = (body: { name?: string; phone?: string; avatar?: string }) =>
   authFetch<AuthUser>('/api/v1/users/me', { method: 'PUT', body: JSON.stringify(body) });
+
+//  Account security 
+// NOTE: backend endpoints for these may not exist yet. Frontend is wired and
+// ready — once the routes below exist server-side, these "just work".
+
+export const changePassword = (body: { current_password: string; new_password: string }) =>
+  authFetch<{ message: string }>('/api/v1/users/me/password', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const deleteAccount = (body?: { password?: string; reason?: string }) =>
+  authFetch<{ message: string }>('/api/v1/users/me', {
+    method: 'DELETE',
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+//  Notification preferences 
+// NOTE: backend endpoints for these may not exist yet.
+
+export const getNotificationPreferences = () =>
+  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences');
+
+export const updateNotificationPreferences = (body: Partial<NotificationPreferences>) =>
+  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+//  Addresses 
+// NOTE: backend endpoints for these may not exist yet.
+
+export const getAddresses = () =>
+  authFetch<Address[]>('/api/v1/users/me/addresses');
+
+export const addAddress = (body: AddressBody) =>
+  authFetch<Address>('/api/v1/users/me/addresses', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const updateAddress = (addressId: string, body: Partial<AddressBody>) =>
+  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const deleteAddress = (addressId: string) =>
+  authFetch<void>(`/api/v1/users/me/addresses/${addressId}`, { method: 'DELETE' });
+
+export const setDefaultAddress = (addressId: string) =>
+  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
+
+//  Saved payment methods 
+// NOTE: backend endpoints for these may not exist yet.
+// Paystack does not let you collect/store raw card numbers on your own
+// server (PCI-DSS) — the real integration pattern is:
+//   1. Frontend redirects to Paystack to add a card (a ₦0 or small auth charge)
+//   2. Paystack returns an `authorization_code` via webhook/callback
+//   3. Backend stores ONLY last_four/expiry/authorization_code, never the PAN
+// These endpoints assume the backend already has that flow; the frontend
+// here never collects/transmits a full card number to your own backend.
+
+export const getSavedPaymentMethods = () =>
+  authFetch<SavedPaymentMethod[]>('/api/v1/users/me/payment-methods');
+
+export const deleteSavedPaymentMethod = (paymentMethodId: string) =>
+  authFetch<void>(`/api/v1/users/me/payment-methods/${paymentMethodId}`, { method: 'DELETE' });
+
+export const setDefaultPaymentMethod = (paymentMethodId: string) =>
+  authFetch<SavedPaymentMethod>(`/api/v1/users/me/payment-methods/${paymentMethodId}/default`, {
+    method: 'PATCH',
+  });
+
+// Initiates Paystack's "add card" flow — backend returns a redirect URL,
+// same shape as your checkout `payment_url` pattern.
+export const initiateAddPaymentMethod = () =>
+  authFetch<{ authorization_url: string }>('/api/v1/users/me/payment-methods/initiate', {
+    method: 'POST',
+  });
 
 // Categories 
 

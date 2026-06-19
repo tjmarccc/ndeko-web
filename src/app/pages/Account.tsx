@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   User, Package, MapPin, CreditCard, Settings, LogOut, Bell, X, Plus, Lock,
-  Check, Menu, Loader2, AlertCircle, RefreshCw,
+  Check, Menu, Loader2, AlertCircle, RefreshCw, Trash2, Pencil, Star, ExternalLink,
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -10,19 +10,14 @@ import { Label } from '../components/ui/label';
 import { useNavigate } from 'react-router';
 import {
   getMe, updateMe, getMyOrders, logoutUser,
-  tokenStore,
-  type AuthUser, type ApiOrder,
+  changePassword, deleteAccount,
+  getNotificationPreferences, updateNotificationPreferences,
+  getAddresses, addAddress, updateAddress, deleteAddress, setDefaultAddress,
+  getSavedPaymentMethods, deleteSavedPaymentMethod, setDefaultPaymentMethod, initiateAddPaymentMethod,
+  tokenStore, ApiError,
+  type AuthUser, type ApiOrder, type Address, type AddressBody,
+  type NotificationPreferences, type SavedPaymentMethod,
 } from '../services/api';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface SavedCard {
-  id: string;
-  number: string;
-  name: string;
-  expiry: string;
-  type: string;
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,22 +30,21 @@ const tabs = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-const notificationSettings = [
-  { id: 'order_updates', label: 'Order Updates', desc: 'Shipping and delivery notifications', defaultOn: true },
-  { id: 'deals', label: 'Flash Deals & Offers', desc: 'Exclusive discounts and cashback alerts', defaultOn: true },
-  { id: 'wishlist', label: 'Wishlist Restocks', desc: 'When wishlisted items are back in stock', defaultOn: false },
-  { id: 'newsletter', label: 'Newsletter', desc: 'Weekly top picks and curated deals', defaultOn: false },
-  { id: 'sms', label: 'SMS Notifications', desc: 'Text alerts for important updates', defaultOn: true },
+const NOTIFICATION_META: { id: keyof NotificationPreferences; label: string; desc: string }[] = [
+  { id: 'order_updates', label: 'Order Updates', desc: 'Shipping and delivery notifications' },
+  { id: 'deals', label: 'Flash Deals & Offers', desc: 'Exclusive discounts and cashback alerts' },
+  { id: 'wishlist', label: 'Wishlist Restocks', desc: 'When wishlisted items are back in stock' },
+  { id: 'newsletter', label: 'Newsletter', desc: 'Weekly top picks and curated deals' },
+  { id: 'sms', label: 'SMS Notifications', desc: 'Text alerts for important updates' },
 ];
 
-function formatCardNumber(value: string) {
-  return value.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
-}
-function formatExpiry(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 4);
-  if (digits.length >= 3) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return digits;
-}
+const DEFAULT_NOTIF_PREFS: NotificationPreferences = {
+  order_updates: true,
+  deals: true,
+  wishlist: false,
+  newsletter: false,
+  sms: true,
+};
 
 function getStatusColor(status: string) {
   switch (status) {
@@ -71,7 +65,13 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function errMsg(e: unknown, fallback: string) {
+  if (e instanceof ApiError) return e.message || fallback;
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
+}
+
+// ─── Shared sub-components ─────────────────────────────────────────────────────
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
@@ -87,192 +87,89 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => vo
   );
 }
 
+function SuccessBanner({ message }: { message: string }) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/10 dark:border-emerald-900/30 text-sm text-emerald-700 dark:text-emerald-400">
+      <Check className="h-4 w-4 flex-shrink-0" />
+      <span className="flex-1">{message}</span>
+    </div>
+  );
+}
+
 function Spinner({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   const cls = size === 'sm' ? 'h-4 w-4' : 'h-8 w-8';
   return <Loader2 className={`${cls} animate-spin text-[#8B1538]`} />;
 }
 
-function AddPaymentModal({
-  onClose,
-  onAdd,
+// ─── Confirm dialog (for destructive actions) ──────────────────────────────────
+
+function ConfirmDialog({
+  title,
+  description,
+  confirmLabel,
+  requireText,
+  danger = true,
+  loading,
+  error,
+  onConfirm,
+  onCancel,
 }: {
-  onClose: () => void;
-  onAdd: (card: { number: string; name: string; expiry: string }) => void;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  requireText?: string; // if set, user must type this exact text to confirm
+  danger?: boolean;
+  loading: boolean;
+  error: string;
+  onConfirm: () => void;
+  onCancel: () => void;
 }) {
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvv, setCvv] = useState('');
-  const [cardType, setCardType] = useState<'verve' | 'visa' | 'mastercard'>('verve');
-  const [saved, setSaved] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaved(true);
-    setTimeout(() => {
-      onAdd({ number: cardNumber, name: cardName, expiry });
-      onClose();
-    }, 900);
-  };
-
-  const detectCardType = (num: string) => {
-    const digits = num.replace(/\s/g, '');
-    if (digits.startsWith('4')) return 'visa';
-    if (digits.startsWith('5')) return 'mastercard';
-    return 'verve';
-  };
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatCardNumber(e.target.value);
-    setCardNumber(formatted);
-    setCardType(detectCardType(formatted));
-  };
-
-  const cardTypeLabel = { visa: 'VISA', mastercard: 'Mastercard', verve: 'Verve' }[cardType];
-  const cardTypeColor = { visa: '#1A1F71', mastercard: '#EB001B', verve: '#8B1538' }[cardType];
+  const [typed, setTyped] = useState('');
+  const canConfirm = !requireText || typed === requireText;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onCancel}>
       <div
-        className="bg-white dark:bg-gray-900 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl overflow-hidden"
+        className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-sm shadow-2xl p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* drag handle on mobile */}
-        <div className="flex justify-center pt-3 sm:hidden">
-          <div className="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-        </div>
+        <h3 className="font-bold text-lg dark:text-white mb-2">{title}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{description}</p>
 
-        <div
-          className="px-6 py-5 flex items-center justify-between"
-          style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
-        >
-          <div>
-            <h2 className="text-white font-bold text-lg">Add Payment Method</h2>
-            <p className="text-white/70 text-xs mt-0.5">Your card details are encrypted & secure</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
-          >
-            <X className="h-4 w-4 text-white" />
-          </button>
-        </div>
-
-        <div className="px-6 pt-6">
-          <div
-            className="rounded-2xl p-5 mb-5 relative overflow-hidden"
-            style={{ background: `linear-gradient(135deg, ${cardTypeColor}, ${cardTypeColor}99)`, minHeight: 120 }}
-          >
-            <div
-              className="absolute inset-0 opacity-10"
-              style={{ backgroundImage: `radial-gradient(circle at 80% 50%, white 0%, transparent 60%)` }}
-            />
-            <div className="relative flex flex-col justify-between h-full" style={{ minHeight: 110 }}>
-              <div className="flex items-center justify-between">
-                <div className="flex gap-1">
-                  <div className="w-7 h-5 rounded-sm bg-yellow-300/80" />
-                  <div className="w-7 h-5 rounded-sm bg-yellow-400/40" />
-                </div>
-                <span className="text-white/80 text-xs font-bold tracking-wider">{cardTypeLabel}</span>
-              </div>
-              <div className="mt-4">
-                <p className="text-white/60 text-xs mb-1 tracking-widest">CARD NUMBER</p>
-                <p className="text-white font-mono text-base tracking-widest">
-                  {cardNumber || '•••• •••• •••• ••••'}
-                </p>
-              </div>
-              <div className="flex items-end justify-between mt-3">
-                <div>
-                  <p className="text-white/50 text-xs mb-0.5">CARDHOLDER</p>
-                  <p className="text-white text-sm font-semibold">{cardName || 'YOUR NAME'}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-white/50 text-xs mb-0.5">EXPIRES</p>
-                  <p className="text-white text-sm font-mono">{expiry || 'MM/YY'}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="px-6 pb-8 space-y-4">
-          <div>
-            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Card Number</Label>
+        {requireText && (
+          <div className="mb-4">
+            <Label className="text-xs text-gray-500 dark:text-gray-400 mb-1.5 block">
+              Type <span className="font-mono font-bold">{requireText}</span> to confirm
+            </Label>
             <Input
-              placeholder="0000 0000 0000 0000"
-              value={cardNumber}
-              onChange={handleCardNumberChange}
-              className="font-mono tracking-wider dark:bg-gray-800 dark:border-gray-700"
-              required
-              maxLength={19}
-            />
-          </div>
-          <div>
-            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Cardholder Name</Label>
-            <Input
-              placeholder="Name as on card"
-              value={cardName}
-              onChange={(e) => setCardName(e.target.value.toUpperCase())}
-              required
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
               className="dark:bg-gray-800 dark:border-gray-700"
+              autoFocus
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Expiry Date</Label>
-              <Input
-                placeholder="MM/YY"
-                value={expiry}
-                onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                maxLength={5}
-                required
-                className="dark:bg-gray-800 dark:border-gray-700"
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">CVV</Label>
-              <div className="relative">
-                <Input
-                  placeholder="•••"
-                  value={cvv}
-                  onChange={(e) => setCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  type="password"
-                  required
-                  className="dark:bg-gray-800 dark:border-gray-700"
-                />
-                <Lock className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
-              </div>
-            </div>
-          </div>
+        )}
 
-          <p className="flex items-center gap-2 text-xs text-gray-400">
-            <Lock className="h-3 w-3 text-[#3D9B8E]" />
-            256-bit SSL encryption · PCI DSS compliant
-          </p>
+        {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
 
-          <button
-            type="submit"
-            disabled={saved}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-white font-bold text-sm transition-all duration-300"
-            style={{
-              background: saved
-                ? 'linear-gradient(135deg, #3D9B8E, #2F7A6F)'
-                : 'linear-gradient(135deg, #8B1538, #D4828F)',
-              boxShadow: '0 4px 20px rgba(139,21,56,0.3)',
-            }}
+        <div className="flex gap-3">
+          <Button variant="outline" className="flex-1" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            className={`flex-1 ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-[#8B1538] hover:bg-[#6B0F2A]'}`}
+            onClick={onConfirm}
+            disabled={loading || !canConfirm}
           >
-            {saved ? <><Check className="h-4 w-4" /> Card Saved!</> : <><Plus className="h-4 w-4" /> Save Card</>}
-          </button>
-        </form>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : confirmLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Tab panels ───────────────────────────────────────────────────────────────
+// ─── Tab: Profile ───────────────────────────────────────────────────────────────
 
 function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) => void }) {
   const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
@@ -291,8 +188,8 @@ function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) 
       onSaved(updated);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2500);
-    } catch (e: any) {
-      setError(e.message ?? 'Failed to save changes');
+    } catch (e) {
+      setError(errMsg(e, 'Failed to save changes'));
     } finally {
       setSaving(false);
     }
@@ -346,6 +243,8 @@ function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) 
   );
 }
 
+// ─── Tab: Orders ────────────────────────────────────────────────────────────────
+
 function OrdersTab() {
   const [orders, setOrders] = useState<ApiOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -361,8 +260,8 @@ function OrdersTab() {
       const res = await getMyOrders(p, LIMIT);
       setOrders(res.data);
       setTotal(res.total);
-    } catch (e: any) {
-      setError(e.message ?? 'Failed to load orders');
+    } catch (e) {
+      setError(errMsg(e, 'Failed to load orders'));
     } finally {
       setLoading(false);
     }
@@ -465,6 +364,646 @@ function OrdersTab() {
   );
 }
 
+// ─── Tab: Addresses ─────────────────────────────────────────────────────────────
+
+const EMPTY_ADDRESS_FORM: AddressBody = {
+  label: '', name: '', phone: '', address: '', city: '', state: '', is_default: false,
+};
+
+function AddressFormModal({
+  initial,
+  onClose,
+  onSave,
+}: {
+  initial?: Address | null;
+  onClose: () => void;
+  onSave: (body: AddressBody) => Promise<void>;
+}) {
+  const [form, setForm] = useState<AddressBody>(
+    initial
+      ? { label: initial.label, name: initial.name, phone: initial.phone, address: initial.address, city: initial.city, state: initial.state, is_default: initial.is_default }
+      : EMPTY_ADDRESS_FORM
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.label.trim() || !form.name.trim() || !form.phone.trim() || !form.address.trim() || !form.city.trim() || !form.state.trim()) {
+      setError('Please fill in all fields.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(form);
+      onClose();
+    } catch (e) {
+      setError(errMsg(e, 'Failed to save address'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-gray-900 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-5 flex items-center justify-between border-b dark:border-gray-800">
+          <h2 className="font-bold text-lg dark:text-white">
+            {initial ? 'Edit Address' : 'Add New Address'}
+          </h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center">
+            <X className="h-4 w-4 dark:text-gray-300" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-3">
+          {error && <ErrorBanner message={error} />}
+          <div>
+            <Label className="text-xs">Label (e.g. Home, Office)</Label>
+            <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Full Name</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+            </div>
+            <div>
+              <Label className="text-xs">Phone</Label>
+              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Street Address</Label>
+            <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">City</Label>
+              <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+            </div>
+            <div>
+              <Label className="text-xs">State</Label>
+              <Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm dark:text-gray-300 pt-1">
+            <input
+              type="checkbox"
+              checked={form.is_default}
+              onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+              className="rounded"
+            />
+            Set as default address
+          </label>
+
+          <Button type="submit" disabled={saving} className="w-full bg-[#8B1538] hover:bg-[#6B0F2A] mt-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : initial ? 'Save Changes' : 'Add Address'}
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddressesTab() {
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Address | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await getAddresses();
+      setAddresses(res);
+    } catch (e) {
+      setError(errMsg(e, 'Failed to load addresses'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async (body: AddressBody) => {
+    if (editing) {
+      const updated = await updateAddress(editing.id, body);
+      setAddresses((prev) => prev.map((a) => (a.id === editing.id ? updated : a)));
+    } else {
+      const created = await addAddress(body);
+      setAddresses((prev) => [...prev, created]);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await deleteAddress(id);
+      setAddresses((prev) => prev.filter((a) => a.id !== id));
+    } catch (e) {
+      setError(errMsg(e, 'Failed to delete address'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSetDefault = async (id: string) => {
+    setSettingDefaultId(id);
+    try {
+      await setDefaultAddress(id);
+      setAddresses((prev) => prev.map((a) => ({ ...a, is_default: a.id === id })));
+    } catch (e) {
+      setError(errMsg(e, 'Failed to update default address'));
+    } finally {
+      setSettingDefaultId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold dark:text-white text-lg">Saved Addresses</h2>
+      </div>
+
+      {error && <ErrorBanner message={error} onRetry={load} />}
+
+      {showForm && (
+        <AddressFormModal
+          initial={editing}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          onSave={handleSave}
+        />
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Spinner size="md" /></div>
+      ) : addresses.length === 0 ? (
+        <div className="text-center py-10 text-gray-400 dark:text-gray-500">
+          <MapPin className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No saved addresses yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {addresses.map((addr) => (
+            <div key={addr.id} className="p-4 border dark:border-gray-700 rounded-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold dark:text-white">{addr.label}</p>
+                    {addr.is_default && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#8B1538]/10 text-[#8B1538] dark:bg-[#8B1538]/20">
+                        DEFAULT
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">
+                    {addr.address}, {addr.city}, {addr.state}
+                  </p>
+                  <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">{addr.name} · {addr.phone}</p>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => { setEditing(addr); setShowForm(true); }}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+                    aria-label="Edit address"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(addr.id)}
+                    disabled={deletingId === addr.id}
+                    className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500"
+                    aria-label="Delete address"
+                  >
+                    {deletingId === addr.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+              {!addr.is_default && (
+                <button
+                  onClick={() => handleSetDefault(addr.id)}
+                  disabled={settingDefaultId === addr.id}
+                  className="text-xs font-semibold text-[#8B1538] hover:underline mt-2 flex items-center gap-1"
+                >
+                  {settingDefaultId === addr.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Star className="h-3 w-3" />}
+                  Set as default
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button
+        className="bg-[#3D9B8E] hover:bg-[#2F7A6F] w-full sm:w-auto"
+        onClick={() => { setEditing(null); setShowForm(true); }}
+      >
+        <Plus className="h-4 w-4 mr-2" /> Add New Address
+      </Button>
+    </div>
+  );
+}
+
+// ─── Tab: Payment Methods ───────────────────────────────────────────────────────
+
+function PaymentMethodsTab() {
+  const [cards, setCards] = useState<SavedPaymentMethod[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await getSavedPaymentMethods();
+      setCards(res);
+    } catch (e) {
+      setError(errMsg(e, 'Failed to load payment methods'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await deleteSavedPaymentMethod(id);
+      setCards((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      setError(errMsg(e, 'Failed to remove card'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSetDefault = async (id: string) => {
+    setSettingDefaultId(id);
+    try {
+      await setDefaultPaymentMethod(id);
+      setCards((prev) => prev.map((c) => ({ ...c, is_default: c.id === id })));
+    } catch (e) {
+      setError(errMsg(e, 'Failed to update default card'));
+    } finally {
+      setSettingDefaultId(null);
+    }
+  };
+
+  // Real card capture goes through Paystack (PCI compliance) — we never collect
+  // raw card numbers ourselves. This kicks off that redirect flow.
+  const handleAddCard = async () => {
+    setRedirecting(true);
+    setError('');
+    try {
+      const { authorization_url } = await initiateAddPaymentMethod();
+      window.location.href = authorization_url;
+    } catch (e) {
+      setError(errMsg(e, 'Could not start card setup. Please try again.'));
+      setRedirecting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold dark:text-white text-lg">Payment Methods</h2>
+        <span className="text-xs text-gray-400 flex items-center gap-1">
+          <Lock className="h-3 w-3 text-[#3D9B8E]" /> Secured by Paystack
+        </span>
+      </div>
+
+      {error && <ErrorBanner message={error} onRetry={load} />}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Spinner size="md" /></div>
+      ) : cards.length === 0 ? (
+        <div className="text-center py-8 text-gray-400 dark:text-gray-500">
+          <CreditCard className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No saved cards yet</p>
+        </div>
+      ) : (
+        cards.map((card) => (
+          <div
+            key={card.id}
+            className="p-4 border dark:border-gray-700 rounded-xl flex items-center justify-between group hover:border-[#8B1538]/40 transition-colors"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #8B153820, #D4828F20)' }}
+              >
+                <CreditCard className="h-5 w-5 text-[#8B1538]" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold dark:text-white text-sm truncate capitalize">
+                    {card.card_type} •••• {card.last_four}
+                  </p>
+                  {card.is_default && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#8B1538]/10 text-[#8B1538] dark:bg-[#8B1538]/20 flex-shrink-0">
+                      DEFAULT
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Expires {card.expiry} · {card.cardholder_name}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+              {!card.is_default && (
+                <button
+                  onClick={() => handleSetDefault(card.id)}
+                  disabled={settingDefaultId === card.id}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-[#8B1538]"
+                  aria-label="Set as default"
+                  title="Set as default"
+                >
+                  {settingDefaultId === card.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />}
+                </button>
+              )}
+              <button
+                onClick={() => handleDelete(card.id)}
+                disabled={deletingId === card.id}
+                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-400 hover:text-red-600"
+                aria-label="Remove card"
+              >
+                {deletingId === card.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+
+      <button
+        onClick={handleAddCard}
+        disabled={redirecting}
+        className="w-full flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed border-[#8B1538]/30 text-[#8B1538] hover:border-[#8B1538] hover:bg-[#8B1538]/5 transition-all text-sm font-semibold disabled:opacity-60"
+      >
+        {redirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+        {redirecting ? 'Redirecting to Paystack…' : 'Add Payment Method'}
+      </button>
+
+      <p className="text-xs text-gray-400 text-center">
+        We accept Verve, Visa and Mastercard. Card details are handled entirely by Paystack — Ndeko never sees or stores your card number.
+      </p>
+    </div>
+  );
+}
+
+// ─── Tab: Notifications ──────────────────────────────────────────────────────────
+
+function NotificationsTab() {
+  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIF_PREFS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await getNotificationPreferences();
+      setPrefs(res);
+    } catch (e) {
+      // If the endpoint isn't there yet / user has none saved, fall back to defaults
+      // rather than blocking the whole tab.
+      setPrefs(DEFAULT_NOTIF_PREFS);
+      setError(errMsg(e, 'Could not load saved preferences — showing defaults.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggle = (id: keyof NotificationPreferences) => {
+    setPrefs((prev) => ({ ...prev, [id]: !prev[id] }));
+    setDirty(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setSuccess(false);
+    try {
+      const updated = await updateNotificationPreferences(prefs);
+      setPrefs(updated);
+      setDirty(false);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 2500);
+    } catch (e) {
+      setError(errMsg(e, 'Failed to save preferences'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12"><Spinner size="md" /></div>
+    );
+  }
+
+  return (
+    <div className="space-y-5 max-w-lg">
+      <h2 className="font-bold dark:text-white text-lg">Notification Preferences</h2>
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Manage how Ndeko Express contacts you about deals, orders, and updates.
+      </p>
+
+      {error && <ErrorBanner message={error} onRetry={load} />}
+      {success && <SuccessBanner message="Preferences saved!" />}
+
+      <div className="space-y-3">
+        {NOTIFICATION_META.map((n) => (
+          <div
+            key={n.id}
+            className="flex items-center justify-between p-4 rounded-xl border dark:border-gray-700 hover:border-[#8B1538]/30 transition-colors gap-4"
+          >
+            <div className="min-w-0">
+              <p className="font-semibold text-sm dark:text-white">{n.label}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.desc}</p>
+            </div>
+            <button
+              onClick={() => toggle(n.id)}
+              className="relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0"
+              style={{ background: prefs[n.id] ? '#8B1538' : '#E5E7EB' }}
+              aria-label={`Toggle ${n.label}`}
+              aria-pressed={prefs[n.id]}
+            >
+              <span
+                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
+                style={{ left: prefs[n.id] ? '1.5rem' : '0.25rem' }}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+      <Button
+        className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto flex items-center gap-2"
+        onClick={handleSave}
+        disabled={saving || !dirty}
+      >
+        {saving && <Spinner />}
+        Save Preferences
+      </Button>
+    </div>
+  );
+}
+
+// ─── Tab: Settings (password + delete account) ───────────────────────────────────
+
+function SettingsTab({ onAccountDeleted }: { onAccountDeleted: () => void }) {
+  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handlePasswordSubmit = async () => {
+    setPwError('');
+    setPwSuccess(false);
+
+    if (!passwordForm.current || !passwordForm.newPass || !passwordForm.confirm) {
+      setPwError('Please fill in all password fields.');
+      return;
+    }
+    if (passwordForm.newPass.length < 8) {
+      setPwError('New password must be at least 8 characters.');
+      return;
+    }
+    if (passwordForm.newPass !== passwordForm.confirm) {
+      setPwError('New password and confirmation do not match.');
+      return;
+    }
+
+    setPwSaving(true);
+    try {
+      await changePassword({
+        current_password: passwordForm.current,
+        new_password: passwordForm.newPass,
+      });
+      setPwSuccess(true);
+      setPasswordForm({ current: '', newPass: '', confirm: '' });
+      setTimeout(() => setPwSuccess(false), 3000);
+    } catch (e) {
+      setPwError(errMsg(e, 'Failed to update password. Check your current password and try again.'));
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteAccount();
+      tokenStore.clear();
+      onAccountDeleted();
+    } catch (e) {
+      setDeleteError(errMsg(e, 'Failed to delete account. Please try again or contact support.'));
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-lg">
+      <h2 className="font-bold dark:text-white text-lg">Account Settings</h2>
+
+      <div className="p-5 rounded-xl border dark:border-gray-700">
+        <h3 className="font-semibold dark:text-white mb-4 text-sm">Change Password</h3>
+        {pwError && <div className="mb-3"><ErrorBanner message={pwError} /></div>}
+        {pwSuccess && <div className="mb-3"><SuccessBanner message="Password updated successfully!" /></div>}
+        <div className="space-y-3">
+          <div>
+            <Label>Current Password</Label>
+            <Input
+              type="password"
+              placeholder="Enter current password"
+              value={passwordForm.current}
+              onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+              className="dark:bg-gray-800 dark:border-gray-700"
+            />
+          </div>
+          <div>
+            <Label>New Password</Label>
+            <Input
+              type="password"
+              placeholder="Enter new password"
+              value={passwordForm.newPass}
+              onChange={(e) => setPasswordForm({ ...passwordForm, newPass: e.target.value })}
+              className="dark:bg-gray-800 dark:border-gray-700"
+            />
+          </div>
+          <div>
+            <Label>Confirm New Password</Label>
+            <Input
+              type="password"
+              placeholder="Confirm new password"
+              value={passwordForm.confirm}
+              onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+              className="dark:bg-gray-800 dark:border-gray-700"
+            />
+          </div>
+          <Button
+            className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto flex items-center gap-2"
+            onClick={handlePasswordSubmit}
+            disabled={pwSaving}
+          >
+            {pwSaving && <Spinner />}
+            Update Password
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-5 rounded-xl border border-red-100 bg-red-50/50 dark:bg-red-900/10 dark:border-red-900/30">
+        <h3 className="font-semibold text-red-700 dark:text-red-400 mb-2 text-sm">Danger Zone</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Permanently delete your account and all associated data. This action cannot be undone.
+        </p>
+        <Button
+          variant="outline"
+          className="text-red-600 border-red-200 hover:bg-red-50 text-sm w-full sm:w-auto"
+          onClick={() => setShowDeleteConfirm(true)}
+        >
+          Delete Account
+        </Button>
+      </div>
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="Delete your account?"
+          description="This will permanently delete your account, orders, wishlist, and saved data. This cannot be undone."
+          confirmLabel="Delete Account"
+          requireText="DELETE"
+          loading={deleting}
+          error={deleteError}
+          onConfirm={handleDeleteAccount}
+          onCancel={() => { setShowDeleteConfirm(false); setDeleteError(''); }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Main Account Page ────────────────────────────────────────────────────────
 
 export function Account() {
@@ -477,21 +1016,6 @@ export function Account() {
   const [userLoading, setUserLoading] = useState(!tokenStore.getUser());
   const [userError, setUserError] = useState('');
 
-  // Payment cards (local only — no payment cards API)
-  const [showAddPayment, setShowAddPayment] = useState(false);
-  const [savedCards, setSavedCards] = useState<SavedCard[]>([
-    { id: '1', number: '4521', name: 'CHIDI NDEKO', expiry: '09/28', type: 'Verve' },
-  ]);
-
-  // Notifications (local only)
-  const [notifState, setNotifState] = useState<Record<string, boolean>>(
-    Object.fromEntries(notificationSettings.map((n) => [n.id, n.defaultOn]))
-  );
-
-  // Settings
-  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
-  const [passwordSaved, setPasswordSaved] = useState(false);
-
   // Load real user on mount
   useEffect(() => {
     const cached = tokenStore.getUser();
@@ -502,25 +1026,23 @@ export function Account() {
         setUser(u);
       })
       .catch((e) => {
-        if (!cached) setUserError(e.message ?? 'Failed to load profile');
+        if (!cached) setUserError(errMsg(e, 'Failed to load profile'));
       })
       .finally(() => setUserLoading(false));
   }, []);
-
-  const handleAddCard = (card: { number: string; name: string; expiry: string }) => {
-    const lastFour = card.number.replace(/\s/g, '').slice(-4);
-    setSavedCards((prev) => [
-      ...prev,
-      { id: String(Date.now()), number: lastFour, name: card.name, expiry: card.expiry, type: 'Card' },
-    ]);
-  };
 
   const handleSignOut = async () => {
     try {
       const refresh = tokenStore.getRefresh();
       if (refresh) await logoutUser(refresh);
-    } catch {}
+    } catch {
+      // best-effort — clear local session regardless
+    }
     tokenStore.clear();
+    navigate('/login');
+  };
+
+  const handleAccountDeleted = () => {
     navigate('/login');
   };
 
@@ -598,11 +1120,6 @@ export function Account() {
         </button>
       </div>
 
-      {/* Add payment modal */}
-      {showAddPayment && (
-        <AddPaymentModal onClose={() => setShowAddPayment(false)} onAdd={handleAddCard} />
-      )}
-
       {/* Mobile sidebar drawer */}
       {sidebarOpen && (
         <div
@@ -671,172 +1188,16 @@ export function Account() {
           {active === 'orders' && <OrdersTab />}
 
           {/* ── Addresses ── */}
-          {active === 'addresses' && (
-            <div className="space-y-4">
-              <h2 className="font-bold dark:text-white text-lg">Saved Addresses</h2>
-              <div className="p-4 border dark:border-gray-700 rounded-xl">
-                <p className="font-semibold dark:text-white">Home</p>
-                <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
-                  12 Adeola Odeku Street, Victoria Island, Lagos
-                </p>
-              </div>
-              <Button className="bg-[#3D9B8E] hover:bg-[#2F7A6F] w-full sm:w-auto">
-                <Plus className="h-4 w-4 mr-2" /> Add New Address
-              </Button>
-            </div>
-          )}
+          {active === 'addresses' && <AddressesTab />}
 
           {/* ── Payment Methods ── */}
-          {active === 'payment' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold dark:text-white text-lg">Payment Methods</h2>
-                <span className="text-xs text-gray-400 flex items-center gap-1">
-                  <Lock className="h-3 w-3 text-[#3D9B8E]" /> Secured
-                </span>
-              </div>
-
-              {savedCards.map((card) => (
-                <div
-                  key={card.id}
-                  className="p-4 border dark:border-gray-700 rounded-xl flex items-center justify-between group hover:border-[#8B1538]/40 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center"
-                      style={{ background: 'linear-gradient(135deg, #8B153820, #D4828F20)' }}
-                    >
-                      <CreditCard className="h-5 w-5 text-[#8B1538]" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold dark:text-white text-sm truncate">
-                        {card.type} •••• {card.number}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Expires {card.expiry} · {card.name}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setSavedCards((prev) => prev.filter((c) => c.id !== card.id))}
-                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-all flex-shrink-0 ml-2"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-
-              <button
-                onClick={() => setShowAddPayment(true)}
-                className="w-full flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed border-[#8B1538]/30 text-[#8B1538] hover:border-[#8B1538] hover:bg-[#8B1538]/5 transition-all text-sm font-semibold"
-              >
-                <Plus className="h-4 w-4" /> Add Payment Method
-              </button>
-
-              <p className="text-xs text-gray-400 text-center">
-                We accept Verve, Visa, Mastercard and bank transfers
-              </p>
-            </div>
-          )}
+          {active === 'payment' && <PaymentMethodsTab />}
 
           {/* ── Notifications ── */}
-          {active === 'notifications' && (
-            <div className="space-y-5 max-w-lg">
-              <h2 className="font-bold dark:text-white text-lg">Notification Preferences</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Manage how Ndeko Express contacts you about deals, orders, and updates.
-              </p>
-              <div className="space-y-3">
-                {notificationSettings.map((n) => (
-                  <div
-                    key={n.id}
-                    className="flex items-center justify-between p-4 rounded-xl border dark:border-gray-700 hover:border-[#8B1538]/30 transition-colors gap-4"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm dark:text-white">{n.label}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.desc}</p>
-                    </div>
-                    <button
-                      onClick={() => setNotifState((prev) => ({ ...prev, [n.id]: !prev[n.id] }))}
-                      className="relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0"
-                      style={{ background: notifState[n.id] ? '#8B1538' : '#E5E7EB' }}
-                      aria-label={`Toggle ${n.label}`}
-                    >
-                      <span
-                        className="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
-                        style={{ left: notifState[n.id] ? '1.5rem' : '0.25rem' }}
-                      />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <Button className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto">
-                Save Preferences
-              </Button>
-            </div>
-          )}
+          {active === 'notifications' && <NotificationsTab />}
 
           {/* ── Settings ── */}
-          {active === 'settings' && (
-            <div className="space-y-6 max-w-lg">
-              <h2 className="font-bold dark:text-white text-lg">Account Settings</h2>
-
-              <div className="p-5 rounded-xl border dark:border-gray-700">
-                <h3 className="font-semibold dark:text-white mb-4 text-sm">Change Password</h3>
-                <div className="space-y-3">
-                  <div>
-                    <Label>Current Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="Enter current password"
-                      value={passwordForm.current}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
-                      className="dark:bg-gray-800 dark:border-gray-700"
-                    />
-                  </div>
-                  <div>
-                    <Label>New Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="Enter new password"
-                      value={passwordForm.newPass}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, newPass: e.target.value })}
-                      className="dark:bg-gray-800 dark:border-gray-700"
-                    />
-                  </div>
-                  <div>
-                    <Label>Confirm New Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="Confirm new password"
-                      value={passwordForm.confirm}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
-                      className="dark:bg-gray-800 dark:border-gray-700"
-                    />
-                  </div>
-                  <Button
-                    className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto flex items-center gap-2"
-                    onClick={() => {
-                      setPasswordSaved(true);
-                      setTimeout(() => setPasswordSaved(false), 2000);
-                    }}
-                  >
-                    {passwordSaved ? <><Check className="h-4 w-4" /> Password Updated</> : 'Update Password'}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="p-5 rounded-xl border border-red-100 bg-red-50/50 dark:bg-red-900/10 dark:border-red-900/30">
-                <h3 className="font-semibold text-red-700 dark:text-red-400 mb-2 text-sm">Danger Zone</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  Permanently delete your account and all associated data. This action cannot be undone.
-                </p>
-                <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 text-sm w-full sm:w-auto">
-                  Delete Account
-                </Button>
-              </div>
-            </div>
-          )}
+          {active === 'settings' && <SettingsTab onAccountDeleted={handleAccountDeleted} />}
         </Card>
       </div>
     </div>
