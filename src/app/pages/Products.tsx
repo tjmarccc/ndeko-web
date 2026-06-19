@@ -568,4 +568,4 @@ export function Products() {
       </div>
     </div>
   );
-}
+};
