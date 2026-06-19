@@ -136,12 +136,31 @@ function PriceRangeInputs({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function Products() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('search') || '';
   const categoryParam = searchParams.get('category') || '';
 
   // ── Filter / sort state ──
-  const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam || 'all');
+  // selectedCategory is derived directly from the URL — the URL is the single
+  // source of truth, so there's no separate useState that can fall out of sync
+  // with it. Selecting a category writes to the URL; the URL is what we read.
+  const selectedCategory = categoryParam || 'all';
+
+  const setSelectedCategory = useCallback(
+    (value: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === 'all') {
+          next.delete('category');
+        } else {
+          next.set('category', value);
+        }
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
+
   // committedPrice: the actual applied filter, only updates when the user blurs/Enters a box
   const [committedPrice, setCommittedPrice] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
   const [sortBy, setSortBy] = useState('featured');
@@ -237,11 +256,6 @@ export function Products() {
     loadProducts(1, false);
   }, [loadProducts]);
 
-  // Sync category param from URL
-  useEffect(() => {
-    setSelectedCategory(categoryParam || 'all');
-  }, [categoryParam]);
-
   // ── Client-side sort ──
   const sortedProducts = useMemo(() => {
     const copy = [...products];
@@ -297,9 +311,9 @@ export function Products() {
         </button>
       </div>
 
-      {/* Categories — plain button list, each one independently sets selectedCategory.
-          "All Categories" is just another option in the same list/group, so there's
-          no special-cased toggle logic that can silently no-op. */}
+      {/* Categories — plain button list, each one independently sets selectedCategory,
+          which now writes straight to the URL. "All Categories" is just another
+          option in the same list/group. */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Categories</h3>
         {catLoading ? (
