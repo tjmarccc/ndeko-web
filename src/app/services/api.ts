@@ -83,41 +83,6 @@ export interface AuthUser {
   phone?: string;
 }
 
-// ─── Account security / addresses / notifications / payment methods ───────────
-// (Backend endpoints for these may not exist yet — see functions below.)
-
-export interface Address {
-  id: string;
-  label: string;          // e.g. "Home", "Office"
-  name: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  is_default: boolean;
-}
-
-export type AddressBody = Omit<Address, 'id'>;
-
-export interface NotificationPreferences {
-  order_updates: boolean;
-  deals: boolean;
-  wishlist: boolean;
-  newsletter: boolean;
-  sms: boolean;
-}
-
-export interface SavedPaymentMethod {
-  id: string;
-  card_type: string;        // 'visa' | 'mastercard' | 'verve' | ...
-  last_four: string;
-  cardholder_name: string;
-  expiry: string;            // 'MM/YY'
-  is_default: boolean;
-  /** Paystack (or other gateway) authorization code used to charge this card later */
-  authorization_code?: string;
-}
-
 export interface AuthResponse {
   user: AuthUser;
   tokens: AuthTokens;
@@ -367,7 +332,9 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
     throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
   }
 
-
+  // Unwrap the standard { success, message, data[, meta] } envelope.
+  // For paginated responses the server sends { data: T[], meta: { total, page, limit } }.
+  // We reassemble that into the PaginatedResponse shape the callers expect.
   const envelope = json as Record<string, unknown>;
   if (envelope?.data !== undefined) {
     if (envelope.meta && typeof envelope.meta === 'object') {
@@ -418,7 +385,7 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
   return json as T;
 }
 
-//  Auth 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const registerUser = (body: RegisterBody) =>
   publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
@@ -446,99 +413,19 @@ export const forgotPassword = (email: string) =>
 export const resetPassword = (body: { email: string; otp: string; password: string }) =>
   publicFetch<void>('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify(body) });
 
-//  Users 
+// ─── Users ────────────────────────────────────────────────────────────────────
 
 export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
 
 export const updateMe = (body: { name?: string; phone?: string; avatar?: string }) =>
   authFetch<AuthUser>('/api/v1/users/me', { method: 'PUT', body: JSON.stringify(body) });
 
-//  Account security 
-// NOTE: backend endpoints for these may not exist yet. Frontend is wired and
-// ready — once the routes below exist server-side, these "just work".
-
-export const changePassword = (body: { current_password: string; new_password: string }) =>
-  authFetch<{ message: string }>('/api/v1/users/me/password', {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-
-export const deleteAccount = (body?: { password?: string; reason?: string }) =>
-  authFetch<{ message: string }>('/api/v1/users/me', {
-    method: 'DELETE',
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-//  Notification preferences 
-// NOTE: backend endpoints for these may not exist yet.
-
-export const getNotificationPreferences = () =>
-  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences');
-
-export const updateNotificationPreferences = (body: Partial<NotificationPreferences>) =>
-  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences', {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-
-//  Addresses 
-// NOTE: backend endpoints for these may not exist yet.
-
-export const getAddresses = () =>
-  authFetch<Address[]>('/api/v1/users/me/addresses');
-
-export const addAddress = (body: AddressBody) =>
-  authFetch<Address>('/api/v1/users/me/addresses', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-
-export const updateAddress = (addressId: string, body: Partial<AddressBody>) =>
-  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-
-export const deleteAddress = (addressId: string) =>
-  authFetch<void>(`/api/v1/users/me/addresses/${addressId}`, { method: 'DELETE' });
-
-export const setDefaultAddress = (addressId: string) =>
-  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
-
-//  Saved payment methods 
-// NOTE: backend endpoints for these may not exist yet.
-// Paystack does not let you collect/store raw card numbers on your own
-// server (PCI-DSS) — the real integration pattern is:
-//   1. Frontend redirects to Paystack to add a card (a ₦0 or small auth charge)
-//   2. Paystack returns an `authorization_code` via webhook/callback
-//   3. Backend stores ONLY last_four/expiry/authorization_code, never the PAN
-// These endpoints assume the backend already has that flow; the frontend
-// here never collects/transmits a full card number to your own backend.
-
-export const getSavedPaymentMethods = () =>
-  authFetch<SavedPaymentMethod[]>('/api/v1/users/me/payment-methods');
-
-export const deleteSavedPaymentMethod = (paymentMethodId: string) =>
-  authFetch<void>(`/api/v1/users/me/payment-methods/${paymentMethodId}`, { method: 'DELETE' });
-
-export const setDefaultPaymentMethod = (paymentMethodId: string) =>
-  authFetch<SavedPaymentMethod>(`/api/v1/users/me/payment-methods/${paymentMethodId}/default`, {
-    method: 'PATCH',
-  });
-
-// Initiates Paystack's "add card" flow — backend returns a redirect URL,
-// same shape as your checkout `payment_url` pattern.
-export const initiateAddPaymentMethod = () =>
-  authFetch<{ authorization_url: string }>('/api/v1/users/me/payment-methods/initiate', {
-    method: 'POST',
-  });
-
-// Categories 
+// ─── Categories ───────────────────────────────────────────────────────────────
 
 export const fetchCategories = (params?: { search?: string; parent_id?: string; page?: number; limit?: number }) =>
   publicFetch<PaginatedResponse<ApiCategory>>(`/api/v1/categories${buildQuery(params)}`);
 
-//  Products 
+// ─── Products ─────────────────────────────────────────────────────────────────
 
 export const fetchProducts = (params?: {
   page?: number;
@@ -565,7 +452,7 @@ export const fetchProductById = async (id: string): Promise<ApiProduct> => {
   return res as ApiProduct;
 };
 
-//  Reviews 
+// ─── Reviews ──────────────────────────────────────────────────────────────────
 
 export const fetchProductReviews = (productId: string, page = 1, limit = 20) =>
   publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/products/${productId}${buildQuery({ page, limit })}`);
@@ -585,7 +472,7 @@ export const addStoreReview = (storeId: string, body: { rating: number; comment?
 export const deleteStoreReview = (reviewId: string) =>
   authFetch<void>(`/api/v1/reviews/stores/reviews/${reviewId}`, { method: 'DELETE' });
 
-//  Wishlist 
+// ─── Wishlist ─────────────────────────────────────────────────────────────────
 
 export const getWishlist = (page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
@@ -596,7 +483,7 @@ export const addToWishlist = (productId: string) =>
 export const removeFromWishlist = (productId: string) =>
   authFetch<{ message: string }>(`/api/v1/wishlists/${productId}`, { method: 'DELETE' });
 
-//  Orders 
+// ─── Orders ───────────────────────────────────────────────────────────────────
 
 export const checkout = (body: CheckoutBody) =>
   authFetch<{ orders: ApiOrder[]; payment_url?: string }>('/api/v1/orders/checkout', { method: 'POST', body: JSON.stringify(body) });
@@ -609,7 +496,7 @@ export const getOrder = (orderId: string) => authFetch<ApiOrder>(`/api/v1/orders
 export const cancelOrder = (orderId: string) =>
   authFetch<ApiOrder>(`/api/v1/orders/my/${orderId}/cancel`, { method: 'PATCH' });
 
-//  Businesses 
+// ─── Businesses ───────────────────────────────────────────────────────────────
 
 export const fetchFeaturedBusinesses = () => publicFetch<ApiBusiness[]>('/api/v1/businesses/featured');
 
@@ -618,7 +505,7 @@ export const getMyBusiness = () => authFetch<ApiBusiness>('/api/v1/businesses/my
 export const updateMyBusiness = (body: Partial<ApiBusiness>) =>
   authFetch<ApiBusiness>('/api/v1/businesses/my', { method: 'PUT', body: JSON.stringify(body) });
 
-//  Stores 
+// ─── Stores ───────────────────────────────────────────────────────────────────
 
 export const fetchPublicStores = (params?: {
   category_slug?: string;
@@ -660,7 +547,7 @@ export const logStoreVisit = (storeId: string) => {
     : publicFetch<void>(path, { method: 'POST' });
 };
 
-//  Analytics 
+// ─── Analytics ────────────────────────────────────────────────────────────────
 
 export const getStoreDashboard = (storeId: string, from?: string, to?: string) =>
   authFetch<StoreDashboard>(`/api/v1/analytics/stores/${storeId}/dashboard${buildQuery({ from, to })}`);
@@ -671,7 +558,7 @@ export const getStoreSnapshots = (storeId: string, limit = 7) =>
 export const getTopProducts = (storeId: string, limit = 10) =>
   authFetch<ApiProduct[]>(`/api/v1/analytics/stores/${storeId}/top-products${buildQuery({ limit })}`);
 
-//  Wallet 
+// ─── Wallet ───────────────────────────────────────────────────────────────────
 
 export const getWallet = () => authFetch<Wallet>('/api/v1/wallet');
 
@@ -686,7 +573,7 @@ export const withdraw = (amount: number) =>
     method: 'POST', body: JSON.stringify({ amount }),
   });
 
-//    Seller products
+// ─── Seller products ──────────────────────────────────────────────────────────
 
 export const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -709,7 +596,7 @@ export const updateProduct = (storeId: string, productId: string, body: Partial<
 export const deleteProduct = (storeId: string, productId: string) =>
   authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
 
-//  Seller orders 
+// ─── Seller orders ────────────────────────────────────────────────────────────
 
 export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiOrder>>(`/api/v1/orders/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -717,7 +604,7 @@ export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
 export const updateOrderStatus = (orderId: string, status: 'processing' | 'shipped' | 'delivered' | 'cancelled') =>
   authFetch<ApiOrder>(`/api/v1/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
 
-//  KYC 
+// ─── KYC ──────────────────────────────────────────────────────────────────────
 
 export const submitKyc = (body: { document_type: string; document_url: string; owner_type?: string; owner_id?: string }) =>
   authFetch<KycSubmission>('/api/v1/kyc', { method: 'POST', body: JSON.stringify(body) });
@@ -725,7 +612,7 @@ export const submitKyc = (body: { document_type: string; document_url: string; o
 export const getMyKyc = (page = 1, limit = 20) =>
   authFetch<PaginatedResponse<KycSubmission>>(`/api/v1/kyc/my${buildQuery({ page, limit })}`);
 
-//  Gigs 
+// ─── Gigs ─────────────────────────────────────────────────────────────────────
 
 export const fetchPublicGigs = (city?: string) => publicFetch<ApiGig[]>(`/api/v1/gigs${buildQuery({ city })}`);
 export const getGig = (gigId: string) => publicFetch<ApiGig>(`/api/v1/gigs/${gigId}`);
@@ -742,7 +629,7 @@ export const cancelGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gi
 export const getMyCreatedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
 export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/assigned${buildQuery({ page, limit })}`);
 
-//  Map ApiProduct → local Product 
+// ─── Map ApiProduct → local Product ──────────────────────────────────────────
 
 export function mapApiProduct(p: ApiProduct): Product {
   const effectivePrice = p.discount_price ?? p.price;

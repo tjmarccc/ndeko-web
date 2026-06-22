@@ -114,17 +114,7 @@ export function Header() {
       <div className="border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         <div className="container mx-auto px-4 py-2">
           <div className="flex items-center gap-6 overflow-x-auto">
-            {/* This button previously had no onClick at all — it was a fully inert
-                button, which is why nothing ever happened on click (no console log,
-                no alert, no navigation). Now it navigates to /products with the
-                category param cleared, same as picking "All Categories" in the
-                Products page sidebar. */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="whitespace-nowrap"
-              onClick={() => navigate('/products')}
-            >
+            <Button variant="ghost" size="sm" className="whitespace-nowrap">
               <Menu className="h-4 w-4 mr-2" />
               All Categories
             </Button>
