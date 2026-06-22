@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { checkout, getMe, type CheckoutBody } from '../services/api';
+import { checkout, getMyAddresses, type CheckoutBody, type ApiAddress } from '../services/api';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -15,14 +15,14 @@ import { Label } from '../components/ui/label';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ShippingForm {
-  name: string;
-  phone: string;
-  address: string;
+  recipient_name: string;
+  recipient_phone: string;
+  street: string;
   city: string;
   state: string;
 }
 
-type PaymentMethod = 'card' | 'bank_transfer' | 'wallet';
+type PaymentMethod = 'card' | 'bank_transfer' | 'pay_on_delivery';
 
 // ─── CHECKOUT PAGE ────────────────────────────────────────────────────────────
 export function Checkout() {
@@ -32,27 +32,44 @@ export function Checkout() {
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [shipping, setShipping] = useState<ShippingForm>({
-    name: '', phone: '', address: '', city: '', state: '',
+    recipient_name: '', recipient_phone: '', street: '', city: '', state: '',
   });
   const [payment, setPayment] = useState<PaymentMethod>('card');
   const [promo, setPromo]     = useState('');
   const [promoApplied, setPromoApplied] = useState(false);
+
+  // ── Saved addresses ─────────────────────────────────────────────────────────
+  const [addresses, setAddresses] = useState<ApiAddress[]>([]);
 
   // ── API state ───────────────────────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [fieldErrors, setFieldErrors]   = useState<Partial<ShippingForm>>({});
 
-  // ── Pre-fill from authenticated user ────────────────────────────────────────
+  // ── Pre-fill from authenticated user + load saved addresses ─────────────────
   useEffect(() => {
     if (!token) { navigate('/login?redirect=/checkout'); return; }
     if (user) {
       setShipping(prev => ({
         ...prev,
-        name:  prev.name  || user.name  || '',
-        phone: prev.phone || user.phone || '',
+        recipient_name:  prev.recipient_name  || user.name  || `${user.first_name} ${user.last_name}`.trim() || '',
+        recipient_phone: prev.recipient_phone || user.phone || '',
       }));
     }
+    getMyAddresses().then(list => {
+      const addrs = Array.isArray(list) ? list : [];
+      setAddresses(addrs);
+      const def = addrs.find(a => a.is_default) ?? addrs[0];
+      if (def) {
+        setShipping({
+          recipient_name:  def.recipient_name  ?? '',
+          recipient_phone: def.recipient_phone ?? '',
+          street:          def.street,
+          city:            def.city,
+          state:           def.state,
+        });
+      }
+    }).catch(() => { /* non-blocking */ });
   }, [user, token, navigate]);
 
   // ── Pricing ─────────────────────────────────────────────────────────────────
@@ -71,11 +88,11 @@ export function Checkout() {
   // ── Field validation ────────────────────────────────────────────────────────
   function validateForm(): boolean {
     const errs: Partial<ShippingForm> = {};
-    if (!shipping.name.trim())    errs.name    = 'Full name is required';
-    if (!shipping.phone.trim())   errs.phone   = 'Phone number is required';
-    if (!shipping.address.trim()) errs.address = 'Address is required';
-    if (!shipping.city.trim())    errs.city    = 'City is required';
-    if (!shipping.state.trim())   errs.state   = 'State is required';
+    if (!shipping.recipient_name.trim())  errs.recipient_name  = 'Full name is required';
+    if (!shipping.recipient_phone.trim()) errs.recipient_phone = 'Phone number is required';
+    if (!shipping.street.trim())          errs.street          = 'Address is required';
+    if (!shipping.city.trim())            errs.city            = 'City is required';
+    if (!shipping.state.trim())           errs.state           = 'State is required';
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -107,12 +124,12 @@ export function Checkout() {
         product_id: item.id,
         quantity:   item.quantity,
       })),
-      shipping_address: {
-        name:    shipping.name.trim(),
-        phone:   shipping.phone.trim(),
-        address: shipping.address.trim(),
-        city:    shipping.city.trim(),
-        state:   shipping.state.trim(),
+      delivery_address: {
+        recipient_name:  shipping.recipient_name.trim(),
+        recipient_phone: shipping.recipient_phone.trim(),
+        street:          shipping.street.trim(),
+        city:            shipping.city.trim(),
+        state:           shipping.state.trim(),
       },
       payment_method: payment,
       ...(promoApplied && promoKey ? { promo_code: promoKey } : {}),
@@ -322,25 +339,46 @@ export function Checkout() {
                   </div>
                 </div>
 
+                {addresses.length > 0 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {addresses.map(a => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setShipping({
+                          recipient_name:  a.recipient_name  ?? '',
+                          recipient_phone: a.recipient_phone ?? '',
+                          street:          a.street,
+                          city:            a.city,
+                          state:           a.state,
+                        })}
+                        className="px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors border-[#8B1538] text-[#8B1538] hover:bg-[#8B1538]/5"
+                      >
+                        {a.label}{a.is_default ? ' ★' : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <Field
-                    id="name" label="Full Name" placeholder="Chidi Ndeko"
-                    value={shipping.name}
-                    onChange={v => setShipping(p => ({ ...p, name: v }))}
-                    error={fieldErrors.name}
+                    id="recipient_name" label="Full Name" placeholder="Chidi Ndeko"
+                    value={shipping.recipient_name}
+                    onChange={v => setShipping(p => ({ ...p, recipient_name: v }))}
+                    error={fieldErrors.recipient_name}
                   />
                   <Field
-                    id="phone" label="Phone Number" placeholder="+234 801 234 5678"
-                    type="tel" value={shipping.phone}
-                    onChange={v => setShipping(p => ({ ...p, phone: v }))}
-                    error={fieldErrors.phone}
+                    id="recipient_phone" label="Phone Number" placeholder="+234 801 234 5678"
+                    type="tel" value={shipping.recipient_phone}
+                    onChange={v => setShipping(p => ({ ...p, recipient_phone: v }))}
+                    error={fieldErrors.recipient_phone}
                   />
                   <div className="sm:col-span-2">
                     <Field
-                      id="address" label="Street Address" placeholder="12 Adeola Odeku Street"
-                      value={shipping.address}
-                      onChange={v => setShipping(p => ({ ...p, address: v }))}
-                      error={fieldErrors.address}
+                      id="street" label="Street Address" placeholder="12 Adeola Odeku Street"
+                      value={shipping.street}
+                      onChange={v => setShipping(p => ({ ...p, street: v }))}
+                      error={fieldErrors.street}
                     />
                   </div>
                   <Field
@@ -384,10 +422,10 @@ export function Checkout() {
                     sublabel="Pay via internet banking or USSD"
                   />
                   <PaymentOption
-                    value="wallet"
+                    value="pay_on_delivery"
                     icon={Shield}
-                    label="Ndeko Wallet"
-                    sublabel="Pay instantly from your Ndeko balance"
+                    label="Pay on Delivery"
+                    sublabel="Cash or POS on delivery"
                   />
                 </div>
 

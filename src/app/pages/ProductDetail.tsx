@@ -10,10 +10,10 @@ import { useCart } from '../contexts/CartContext';
 import { toast } from 'sonner';
 import { useState, useEffect, useCallback } from 'react';
 import {
-  fetchProducts, fetchProductById, fetchProductReviews, addProductReview,
-  addToWishlist, removeFromWishlist, mapApiProduct,
-  tokenStore,
-  type ApiProduct, type ApiReview,
+  fetchProducts, fetchProductById, fetchProductReviews, fetchProductReviewSummary,
+  addProductReview, addToWishlist, removeFromWishlist, mapApiProduct,
+  tokenStore, ApiError,
+  type ApiReview, type ReviewSummary,
 } from '../services/api';
 import type { Product } from '../types/product';
 
@@ -57,8 +57,11 @@ function ReviewForm({ productId, onPosted }: { productId: string; onPosted: () =
       setComment('');
       onPosted();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to post review';
-      toast.error(msg);
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error('You have already reviewed this product.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to post review');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -122,7 +125,7 @@ export function ProductDetail() {
 
   const [reviews, setReviews] = useState<ApiReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [reviewTotal, setReviewTotal] = useState(0);
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
 
   const [wishlisted, setWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -132,12 +135,15 @@ export function ProductDetail() {
     setLoading(true);
     setError('');
     try {
-      const raw = await fetchProductById(id);
-      const mapped = mapApiProduct(raw);
-      setProduct(mapped);
+      const [raw, summaryRes] = await Promise.all([
+        fetchProductById(id),
+        fetchProductReviewSummary(id).catch(() => null),
+      ]);
+      setProduct(mapApiProduct(raw));
+      setReviewSummary(summaryRes);
 
       if (raw.category?.slug) {
-        const rel = await fetchProducts({ category: raw.category.slug, limit: 5 });
+        const rel = await fetchProducts({ category_slug: raw.category.slug, limit: 5 });
         setRelated(
           rel.data
             .filter((p) => p.id !== id)
@@ -156,9 +162,12 @@ export function ProductDetail() {
     if (!id) return;
     setReviewsLoading(true);
     try {
-      const res = await fetchProductReviews(id, 1, 10);
-      setReviews(res.data);
-      setReviewTotal(res.total ?? 0);
+      const [listRes, summaryRes] = await Promise.all([
+        fetchProductReviews(id, 1, 10),
+        fetchProductReviewSummary(id).catch(() => null),
+      ]);
+      setReviews(listRes.data);
+      if (summaryRes) setReviewSummary(summaryRes);
     } catch {}
     finally { setReviewsLoading(false); }
   }, [id]);
@@ -269,9 +278,9 @@ export function ProductDetail() {
               </h1>
 
               <div className="flex items-center gap-2 mb-4">
-                <StarRow rating={product.rating} size="lg" />
+                <StarRow rating={reviewSummary?.avg_rating ?? 0} size="lg" />
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {(product.rating ?? 0).toFixed(1)} ({product.reviews ?? 0} review{(product.reviews ?? 0) !== 1 ? 's' : ''})
+                  {(reviewSummary?.avg_rating ?? 0).toFixed(1)} ({reviewSummary?.total_reviews ?? 0} review{(reviewSummary?.total_reviews ?? 0) !== 1 ? 's' : ''})
                 </span>
               </div>
 
@@ -370,10 +379,46 @@ export function ProductDetail() {
             <h2 className="text-lg sm:text-xl font-bold dark:text-white flex items-center gap-2">
               <MessageSquare className="h-5 w-5 text-[#8B1538]" />
               Reviews
-              {reviewTotal > 0 && (
-                <span className="text-sm font-normal text-gray-400 dark:text-gray-500">({reviewTotal})</span>
+              {(reviewSummary?.total_reviews ?? 0) > 0 && (
+                <span className="text-sm font-normal text-gray-400 dark:text-gray-500">({reviewSummary!.total_reviews})</span>
               )}
             </h2>
+            {reviewSummary && reviewSummary.avg_rating != null && (
+              <div className="flex flex-wrap items-center gap-4 mt-2 mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl font-black text-gray-800 dark:text-white">{reviewSummary.avg_rating.toFixed(1)}</span>
+                  <div>
+                    <div className="flex gap-0.5">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star key={i} className="h-4 w-4" fill={i < Math.round(reviewSummary.avg_rating!) ? '#F59E0B' : '#E5E7EB'} stroke="none" />
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">{reviewSummary.total_reviews} review{reviewSummary.total_reviews !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+                {reviewSummary.verified_count != null && reviewSummary.verified_count > 0 && (
+                  <span className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full font-medium">
+                    {reviewSummary.verified_count} verified purchase{reviewSummary.verified_count !== 1 ? 's' : ''}
+                  </span>
+                )}
+                <div className="flex flex-col gap-0.5 ml-auto">
+                  {[5,4,3,2,1].map(star => {
+                    const count = reviewSummary.breakdown?.[String(star)] ?? 0;
+                    const pct = reviewSummary.total_reviews > 0 ? (count / reviewSummary.total_reviews) * 100 : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-1.5">
+                        <span className="text-xs text-gray-400 w-2">{star}</span>
+                        <Star className="h-3 w-3 text-amber-400 fill-amber-400" />
+                        <div className="w-20 h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                          <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-400 w-3">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mb-5">
@@ -394,15 +439,14 @@ export function ProductDetail() {
               {reviews.map((r) => (
                 <div key={r.id} className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-2xl p-4 sm:p-5">
                   <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-full bg-[#8B1538]/10 flex items-center justify-center flex-shrink-0">
-                      {r.user.avatar
-                        ? <img src={r.user.avatar} alt={r.user.name} className="w-9 h-9 rounded-full object-cover" />
-                        : <User className="h-4 w-4 text-[#8B1538]" />
-                      }
+                    <div className="w-9 h-9 rounded-full bg-[#8B1538]/10 flex items-center justify-center flex-shrink-0 text-xs font-bold text-[#8B1538]">
+                      {r.reviewer ? `${r.reviewer.first_name[0]}${r.reviewer.last_name[0]}`.toUpperCase() : <User className="h-4 w-4 text-[#8B1538]" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <p className="font-semibold dark:text-white text-sm">{r.user.name}</p>
+                        <p className="font-semibold dark:text-white text-sm">
+                          {r.reviewer ? `${r.reviewer.first_name} ${r.reviewer.last_name[0]}.` : 'Anonymous'}
+                        </p>
                         {r.is_verified_purchase && (
                           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full font-medium">
                             Verified Purchase

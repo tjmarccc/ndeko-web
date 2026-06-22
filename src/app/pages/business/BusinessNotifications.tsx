@@ -1,123 +1,140 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ShoppingBag, AlertTriangle, Star, TrendingUp,
-  Bell, Check, Trash2, Filter, Loader2, RefreshCw,
+  Bell, Check, Trash2, Filter, RefreshCw,
 } from 'lucide-react';
 
-// ─── API layer ────────────────────────────────────────────────────────────────
+import {
+  ApiError,
+  getMyStores,
+  getStoreOrders,
+  getStoreProducts,
+  fetchStoreReviews,
+  getWalletTransactions,
+  type ApiStore,
+  type ApiOrder,
+  type ApiProduct,
+  type ApiReview,
+  type PaginatedResponse,
+  type WalletTransaction,
+} from '../../services/api';
 
-const BASE_URL = 'https://ndeko-backend-prod.onrender.com';
+type WalletTx = WalletTransaction;
 
-const tokenStore = {
-  getAccess: () => localStorage.getItem('ndeko_access_token'),
-  getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
-  setAccess: (t: string) => localStorage.setItem('ndeko_access_token', t),
-  setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
-  clear: () => {
-    localStorage.removeItem('ndeko_access_token');
-    localStorage.removeItem('ndeko_refresh_token');
-    localStorage.removeItem('ndeko_user');
-  },
-};
+// ─── API layer (replaced by api.ts imports above) ─────────────────────────────
 
-class ApiError extends Error {
-  constructor(public message: string, public status: number, public body: unknown = null) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+// const BASE_URL = 'https://ndeko-backend-prod.onrender.com';
 
-async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers as object) },
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const token = tokenStore.getAccess();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as object),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-
-  if (res.status === 401 && retry) {
-    const refresh = tokenStore.getRefresh();
-    if (refresh) {
-      try {
-        const tokens = await publicFetch<{ access_token: string; refresh_token?: string }>(
-          '/api/v1/auth/refresh',
-          { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }
-        );
-        tokenStore.setAccess(tokens.access_token);
-        if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
-        return authFetch<T>(path, options, false);
-      } catch { /* fall through */ }
-    }
-    tokenStore.clear();
-    window.location.href = '/login';
-    throw new ApiError('Session expired', 401);
-  }
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
-  return json as T;
-}
-
-// ─── Remote types ─────────────────────────────────────────────────────────────
-
-interface ApiStore { id: string; store_name: string; store_slug: string; status: string }
-interface ApiOrder {
-  id: string; order_number: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
-  payment_status: 'pending' | 'paid' | 'failed';
-  total_amount: number; created_at: string;
-}
-interface ApiProduct {
-  id: string; name: string; price: number;
-  stock_quantity: number; stock_status: 'in_stock' | 'out_of_stock' | 'low_stock';
-  images: string[];
-}
-interface ApiReview {
-  id: string; rating: number; comment?: string;
-  user: { id: string; name: string; avatar?: string };
-  created_at: string;
-}
-interface PaginatedResponse<T> { data: T[]; total: number; page: number; limit: number }
-interface WalletTx {
-  id: string; type?: string; amount: number;
-  status?: string; description?: string; created_at: string;
-}
-
-// ─── API calls ────────────────────────────────────────────────────────────────
-
-const getMyStores = () =>
-  authFetch<PaginatedResponse<ApiStore> | ApiStore[]>('/api/v1/stores/my');
-
-const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiOrder>>(
-    `/api/v1/orders/stores/${storeId}?page=${page}&limit=${limit}`
-  );
-
-const getStoreProducts = (storeId: string, limit = 100) =>
-  authFetch<PaginatedResponse<ApiProduct>>(
-    `/api/v1/products/stores/${storeId}?page=1&limit=${limit}`
-  );
-
-const fetchStoreReviews = (storeId: string, page = 1, limit = 20) =>
-  publicFetch<PaginatedResponse<ApiReview>>(
-    `/api/v1/reviews/stores/${storeId}?page=${page}&limit=${limit}`
-  );
-
-const getWalletTransactions = (page = 1, limit = 10) =>
-  authFetch<PaginatedResponse<WalletTx>>(
-    `/api/v1/wallet/transactions?page=${page}&limit=${limit}`
-  );
+// const tokenStore = {
+//   getAccess: () => localStorage.getItem('ndeko_access_token'),
+//   getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
+//   setAccess: (t: string) => localStorage.setItem('ndeko_access_token', t),
+//   setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
+//   clear: () => {
+//     localStorage.removeItem('ndeko_access_token');
+//     localStorage.removeItem('ndeko_refresh_token');
+//     localStorage.removeItem('ndeko_user');
+//   },
+// };
+//
+// class ApiError extends Error {
+//   constructor(public message: string, public status: number, public body: unknown = null) {
+//     super(message);
+//     this.name = 'ApiError';
+//   }
+// }
+//
+// async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+//   const res = await fetch(`${BASE_URL}${path}`, {
+//     ...options,
+//     headers: { 'Content-Type': 'application/json', ...(options.headers as object) },
+//   });
+//   const json = await res.json().catch(() => ({}));
+//   if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
+//   return json as T;
+// }
+//
+// async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+//   const token = tokenStore.getAccess();
+//   const headers: Record<string, string> = {
+//     'Content-Type': 'application/json',
+//     ...(options.headers as object),
+//   };
+//   if (token) headers['Authorization'] = `Bearer ${token}`;
+//   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+//
+//   if (res.status === 401 && retry) {
+//     const refresh = tokenStore.getRefresh();
+//     if (refresh) {
+//       try {
+//         const tokens = await publicFetch<{ access_token: string; refresh_token?: string }>(
+//           '/api/v1/auth/refresh',
+//           { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }
+//         );
+//         tokenStore.setAccess(tokens.access_token);
+//         if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
+//         return authFetch<T>(path, options, false);
+//       } catch { /* fall through */ }
+//     }
+//     tokenStore.clear();
+//     window.location.href = '/login';
+//     throw new ApiError('Session expired', 401);
+//   }
+//
+//   const json = await res.json().catch(() => ({}));
+//   if (!res.ok) throw new ApiError(json?.message ?? `Request failed: ${res.status}`, res.status, json);
+//   return json as T;
+// }
+//
+// // ─── Remote types ──────────────────────────────────────────────────────────
+//
+// interface ApiStore { id: string; store_name: string; store_slug: string; status: string }
+// interface ApiOrder {
+//   id: string; order_number: string;
+//   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+//   payment_status: 'pending' | 'paid' | 'failed';
+//   total_amount: number; created_at: string;
+// }
+// interface ApiProduct {
+//   id: string; name: string; price: number;
+//   stock_quantity: number; stock_status: 'in_stock' | 'out_of_stock' | 'low_stock';
+//   images: string[];
+// }
+// interface ApiReview {
+//   id: string; rating: number; comment?: string;
+//   user: { id: string; name: string; avatar?: string };
+//   created_at: string;
+// }
+// interface PaginatedResponse<T> { data: T[]; total: number; page: number; limit: number }
+// interface WalletTx {
+//   id: string; type?: string; amount: number;
+//   status?: string; description?: string; created_at: string;
+// }
+//
+// // ─── API calls ─────────────────────────────────────────────────────────────
+//
+// const getMyStores = () =>
+//   authFetch<PaginatedResponse<ApiStore> | ApiStore[]>('/api/v1/stores/my');
+//
+// const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
+//   authFetch<PaginatedResponse<ApiOrder>>(
+//     `/api/v1/orders/stores/${storeId}?page=${page}&limit=${limit}`
+//   );
+//
+// const getStoreProducts = (storeId: string, limit = 100) =>
+//   authFetch<PaginatedResponse<ApiProduct>>(
+//     `/api/v1/products/stores/${storeId}?page=1&limit=${limit}`
+//   );
+//
+// const fetchStoreReviews = (storeId: string, page = 1, limit = 20) =>
+//   publicFetch<PaginatedResponse<ApiReview>>(
+//     `/api/v1/reviews/stores/${storeId}?page=${page}&limit=${limit}`
+//   );
+//
+// const getWalletTransactions = (page = 1, limit = 10) =>
+//   authFetch<PaginatedResponse<WalletTx>>(
+//     `/api/v1/wallet/transactions?page=${page}&limit=${limit}`
+//   );
 
 // ─── Notification model ───────────────────────────────────────────────────────
 
@@ -166,11 +183,11 @@ function deriveNotifications(
   // Orders → recent status changes
   for (const o of orders) {
     const statusMessages: Partial<Record<ApiOrder['status'], { title: string; msg: string }>> = {
-      pending:    { title: 'New Order Received', msg: `Order #${o.order_number} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
+      pending: { title: 'New Order Received', msg: `Order #${o.order_number} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
       processing: { title: 'Order in Processing', msg: `Order #${o.order_number} (₦${o.total_amount.toLocaleString()}) is being prepared.` },
-      shipped:    { title: 'Order Shipped', msg: `Order #${o.order_number} has been picked up by the courier.` },
-      delivered:  { title: 'Order Delivered', msg: `Order #${o.order_number} was delivered successfully.` },
-      cancelled:  { title: 'Order Cancelled', msg: `Order #${o.order_number} was cancelled.` },
+      shipped: { title: 'Order Shipped', msg: `Order #${o.order_number} has been picked up by the courier.` },
+      delivered: { title: 'Order Delivered', msg: `Order #${o.order_number} was delivered successfully.` },
+      cancelled: { title: 'Order Cancelled', msg: `Order #${o.order_number} was cancelled.` },
     };
     const cfg = statusMessages[o.status];
     if (cfg) {
@@ -217,10 +234,10 @@ function deriveNotifications(
     notifs.push({
       id: makeId('review', r.id),
       type: 'review',
-      title: `${r.rating}-Star Review from ${r.user.name}`,
+      title: `${r.rating}-Star Review from ${r.reviewer.first_name} ${r.reviewer.last_name}`,
       message: r.comment
-        ? `${r.user.name} left a ${stars} review: "${r.comment}"`
-        : `${r.user.name} gave your store ${r.rating} star${r.rating !== 1 ? 's' : ''}.`,
+        ? `${r.reviewer.first_name} ${r.reviewer.last_name} left a ${stars} review: "${r.comment}"`
+        : `${r.reviewer.first_name} ${r.reviewer.last_name} gave your store ${r.rating} star${r.rating !== 1 ? 's' : ''}.`,
       time: r.created_at,
       timeLabel: relativeTime(r.created_at),
       read: true,
@@ -230,11 +247,11 @@ function deriveNotifications(
   // Wallet → payouts / credits
   for (const tx of wallet) {
     const amt = `₦${Number(tx.amount).toLocaleString()}`;
-    const desc = tx.description ?? (tx.type === 'withdrawal' ? 'Payout processed' : 'Wallet credited');
+    const desc = tx.description ?? (tx.type === 'debit' ? 'Payout processed' : 'Wallet credited');
     notifs.push({
       id: makeId('wallet', tx.id),
       type: 'payout',
-      title: tx.type === 'withdrawal' ? 'Payout Processed' : 'Wallet Credited',
+      title: tx.type === 'debit' ? 'Payout Processed' : 'Wallet Credited',
       message: `${amt} — ${desc}`,
       time: tx.created_at,
       timeLabel: relativeTime(tx.created_at),
@@ -266,11 +283,11 @@ function savePersisted(state: PersistedState) {
 // ─── Type config ──────────────────────────────────────────────────────────────
 
 const TYPE_CFG: Record<NotifType, { icon: React.ElementType; color: string; bg: string; label: string }> = {
-  order:  { icon: ShoppingBag,   color: '#8B1538', bg: '#FDF2F4', label: 'Orders'  },
-  stock:  { icon: AlertTriangle, color: '#D97706', bg: '#FFFBEB', label: 'Stock'   },
-  review: { icon: Star,          color: '#6366F1', bg: '#EEF2FF', label: 'Reviews' },
-  payout: { icon: TrendingUp,    color: '#3D9B8E', bg: '#F0FDFA', label: 'Payouts' },
-  system: { icon: Bell,          color: '#D4828F', bg: '#FDF2F8', label: 'System'  },
+  order: { icon: ShoppingBag, color: '#8B1538', bg: '#FDF2F4', label: 'Orders' },
+  stock: { icon: AlertTriangle, color: '#D97706', bg: '#FFFBEB', label: 'Stock' },
+  review: { icon: Star, color: '#6366F1', bg: '#EEF2FF', label: 'Reviews' },
+  payout: { icon: TrendingUp, color: '#3D9B8E', bg: '#F0FDFA', label: 'Payouts' },
+  system: { icon: Bell, color: '#D4828F', bg: '#FDF2F8', label: 'System' },
 };
 
 const FILTER_TYPES: Array<'all' | NotifType> = ['all', 'order', 'stock', 'review', 'payout', 'system'];
@@ -320,17 +337,17 @@ export function BusinessNotifications() {
         getWalletTransactions(1, 10),
       ]);
 
-      const orders  = ordersRes.status   === 'fulfilled' ? ordersRes.value.data ?? []   : [];
-      const products= productsRes.status === 'fulfilled' ? productsRes.value.data ?? [] : [];
-      const reviews = reviewsRes.status  === 'fulfilled' ? reviewsRes.value.data ?? []  : [];
-      const wallet  = walletRes.status   === 'fulfilled' ? walletRes.value.data ?? []   : [];
+      const orders = ordersRes.status === 'fulfilled' ? ordersRes.value.data ?? [] : [];
+      const products = productsRes.status === 'fulfilled' ? productsRes.value.data ?? [] : [];
+      const reviews = reviewsRes.status === 'fulfilled' ? reviewsRes.value.data ?? [] : [];
+      const wallet = walletRes.status === 'fulfilled' ? walletRes.value.data ?? [] : [];
 
       const derived = deriveNotifications(orders, products, reviews, wallet);
-      const state   = loadPersisted();
+      const state = loadPersisted();
       setPersisted(state);
       setNotifications(applyPersisted(derived, state));
     } catch (e) {
-      const msg = e instanceof ApiError ? `${e.message} (${e.status})` : 'Failed to load notifications.';
+      const msg = e instanceof ApiError ? `${e.message} (${e.status})` : e instanceof Error ? e.message : 'Failed to load notifications.';
       setError(msg);
     } finally {
       setLoading(false);

@@ -1,21 +1,22 @@
 import { useState, useEffect } from 'react';
 import {
   User, Package, MapPin, CreditCard, Settings, LogOut, Bell, X, Plus, Lock,
-  Check, Menu, Loader2, AlertCircle, RefreshCw, Trash2, Pencil, Star, ExternalLink,
+  Check, Menu, Loader2, AlertCircle, RefreshCw, Trash2, Pencil, Star, ExternalLink, Eye, EyeOff,
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import {
   getMe, updateMe, getMyOrders, logoutUser,
   changePassword, deleteAccount,
   getNotificationPreferences, updateNotificationPreferences,
-  getAddresses, addAddress, updateAddress, deleteAddress, setDefaultAddress,
+  getMyAddresses as getAddresses, createAddress as addAddress, updateAddress, deleteAddress, setDefaultAddress,
   getSavedPaymentMethods, deleteSavedPaymentMethod, setDefaultPaymentMethod, initiateAddPaymentMethod,
   tokenStore, ApiError,
-  type AuthUser, type ApiOrder, type Address, type AddressBody,
+  type AuthUser, type ApiOrder, type ApiAddress as Address, type AddressBody,
   type NotificationPreferences, type SavedPaymentMethod,
 } from '../services/api';
 
@@ -367,7 +368,7 @@ function OrdersTab() {
 // ─── Tab: Addresses ─────────────────────────────────────────────────────────────
 
 const EMPTY_ADDRESS_FORM: AddressBody = {
-  label: '', name: '', phone: '', address: '', city: '', state: '', is_default: false,
+  label: '', recipient_name: '', recipient_phone: '', street: '', city: '', state: '', country: 'Nigeria', is_default: false,
 };
 
 function AddressFormModal({
@@ -381,7 +382,7 @@ function AddressFormModal({
 }) {
   const [form, setForm] = useState<AddressBody>(
     initial
-      ? { label: initial.label, name: initial.name, phone: initial.phone, address: initial.address, city: initial.city, state: initial.state, is_default: initial.is_default }
+      ? { label: initial.label, recipient_name: initial.recipient_name ?? '', recipient_phone: initial.recipient_phone ?? '', street: initial.street, city: initial.city, state: initial.state, country: initial.country ?? 'Nigeria', is_default: initial.is_default }
       : EMPTY_ADDRESS_FORM
   );
   const [saving, setSaving] = useState(false);
@@ -389,7 +390,7 @@ function AddressFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.label.trim() || !form.name.trim() || !form.phone.trim() || !form.address.trim() || !form.city.trim() || !form.state.trim()) {
+    if (!form.label.trim() || !form.street.trim() || !form.city.trim() || !form.state.trim()) {
       setError('Please fill in all fields.');
       return;
     }
@@ -429,16 +430,16 @@ function AddressFormModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Full Name</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+              <Input value={form.recipient_name ?? ''} onChange={(e) => setForm({ ...form, recipient_name: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
             </div>
             <div>
               <Label className="text-xs">Phone</Label>
-              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+              <Input value={form.recipient_phone ?? ''} onChange={(e) => setForm({ ...form, recipient_phone: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
             </div>
           </div>
           <div>
             <Label className="text-xs">Street Address</Label>
-            <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
+            <Input value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -449,6 +450,10 @@ function AddressFormModal({
               <Label className="text-xs">State</Label>
               <Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
             </div>
+          </div>
+          <div>
+            <Label className="text-xs">Country</Label>
+            <Input value={form.country ?? ''} onChange={(e) => setForm({ ...form, country: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
           </div>
           <label className="flex items-center gap-2 text-sm dark:text-gray-300 pt-1">
             <input
@@ -565,9 +570,13 @@ function AddressesTab() {
                     )}
                   </div>
                   <p className="text-gray-600 dark:text-gray-400 text-sm">
-                    {addr.address}, {addr.city}, {addr.state}
+                    {addr.street}, {addr.city}, {addr.state}{addr.country ? `, ${addr.country}` : ''}
                   </p>
-                  <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">{addr.name} · {addr.phone}</p>
+                  {(addr.recipient_name || addr.recipient_phone) && (
+                    <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
+                      {[addr.recipient_name, addr.recipient_phone].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
@@ -868,11 +877,11 @@ function NotificationsTab() {
 
 // ─── Tab: Settings (password + delete account) ───────────────────────────────────
 
-function SettingsTab({ onAccountDeleted }: { onAccountDeleted: () => void }) {
+function SettingsTab({ onAccountDeleted, onPasswordChanged }: { onAccountDeleted: () => void; onPasswordChanged: () => void }) {
   const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
   const [pwSaving, setPwSaving] = useState(false);
   const [pwError, setPwError] = useState('');
-  const [pwSuccess, setPwSuccess] = useState(false);
+  const [showPw, setShowPw] = useState({ current: false, newPass: false, confirm: false });
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -880,7 +889,6 @@ function SettingsTab({ onAccountDeleted }: { onAccountDeleted: () => void }) {
 
   const handlePasswordSubmit = async () => {
     setPwError('');
-    setPwSuccess(false);
 
     if (!passwordForm.current || !passwordForm.newPass || !passwordForm.confirm) {
       setPwError('Please fill in all password fields.');
@@ -901,9 +909,9 @@ function SettingsTab({ onAccountDeleted }: { onAccountDeleted: () => void }) {
         current_password: passwordForm.current,
         new_password: passwordForm.newPass,
       });
-      setPwSuccess(true);
-      setPasswordForm({ current: '', newPass: '', confirm: '' });
-      setTimeout(() => setPwSuccess(false), 3000);
+      tokenStore.clear();
+      toast.success('Password updated. Please log in again.');
+      setTimeout(onPasswordChanged, 1500);
     } catch (e) {
       setPwError(errMsg(e, 'Failed to update password. Check your current password and try again.'));
     } finally {
@@ -931,38 +939,32 @@ function SettingsTab({ onAccountDeleted }: { onAccountDeleted: () => void }) {
       <div className="p-5 rounded-xl border dark:border-gray-700">
         <h3 className="font-semibold dark:text-white mb-4 text-sm">Change Password</h3>
         {pwError && <div className="mb-3"><ErrorBanner message={pwError} /></div>}
-        {pwSuccess && <div className="mb-3"><SuccessBanner message="Password updated successfully!" /></div>}
         <div className="space-y-3">
-          <div>
-            <Label>Current Password</Label>
-            <Input
-              type="password"
-              placeholder="Enter current password"
-              value={passwordForm.current}
-              onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
-              className="dark:bg-gray-800 dark:border-gray-700"
-            />
-          </div>
-          <div>
-            <Label>New Password</Label>
-            <Input
-              type="password"
-              placeholder="Enter new password"
-              value={passwordForm.newPass}
-              onChange={(e) => setPasswordForm({ ...passwordForm, newPass: e.target.value })}
-              className="dark:bg-gray-800 dark:border-gray-700"
-            />
-          </div>
-          <div>
-            <Label>Confirm New Password</Label>
-            <Input
-              type="password"
-              placeholder="Confirm new password"
-              value={passwordForm.confirm}
-              onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
-              className="dark:bg-gray-800 dark:border-gray-700"
-            />
-          </div>
+          {([
+            { key: 'current', label: 'Current Password', placeholder: 'Enter current password' },
+            { key: 'newPass', label: 'New Password', placeholder: 'Enter new password' },
+            { key: 'confirm', label: 'Confirm New Password', placeholder: 'Confirm new password' },
+          ] as const).map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <Label>{label}</Label>
+              <div className="relative">
+                <Input
+                  type={showPw[key] ? 'text' : 'password'}
+                  placeholder={placeholder}
+                  value={passwordForm[key]}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, [key]: e.target.value })}
+                  className="dark:bg-gray-800 dark:border-gray-700 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((s) => ({ ...s, [key]: !s[key] }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  {showPw[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          ))}
           <Button
             className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto flex items-center gap-2"
             onClick={handlePasswordSubmit}
@@ -1043,6 +1045,10 @@ export function Account() {
   };
 
   const handleAccountDeleted = () => {
+    navigate('/login');
+  };
+
+  const handlePasswordChanged = () => {
     navigate('/login');
   };
 
@@ -1197,7 +1203,7 @@ export function Account() {
           {active === 'notifications' && <NotificationsTab />}
 
           {/* ── Settings ── */}
-          {active === 'settings' && <SettingsTab onAccountDeleted={handleAccountDeleted} />}
+          {active === 'settings' && <SettingsTab onAccountDeleted={handleAccountDeleted} onPasswordChanged={handlePasswordChanged} />}
         </Card>
       </div>
     </div>

@@ -8,8 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { useState, useEffect, useCallback } from 'react';
-
-const BASE_URL = 'https://ndeko-backend-prod.onrender.com';
+import { fetchProductById } from '../services/api';
 
 interface StockWarning {
   productId: string;
@@ -39,15 +38,12 @@ export function Cart() {
     setIsValidating(true);
     try {
       const results = await Promise.allSettled(
-        cart.map(item =>
-          fetch(`${BASE_URL}/api/v1/products?id=${item.id}`).then(r => r.json())
-        )
+        cart.map(item => fetchProductById(item.id))
       );
       const warnings: StockWarning[] = [];
       results.forEach((result, idx) => {
         if (result.status === 'fulfilled') {
-          const product = result.value?.data ?? result.value;
-          const available: number = product?.stock_quantity ?? Infinity;
+          const available: number = result.value?.stock_quantity ?? Infinity;
           const cartQty = cart[idx].quantity;
           if (available === 0) {
             removeFromCart(cart[idx].id);
@@ -79,7 +75,7 @@ export function Cart() {
     setIsCheckingOut(true);
     setCheckoutError(null);
     try {
-      const response = await fetch(`${BASE_URL}/api/v1/orders/checkout`, {
+      const response = await fetch('/api/v1/orders/checkout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

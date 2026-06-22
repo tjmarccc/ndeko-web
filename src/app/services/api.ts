@@ -86,18 +86,6 @@ export interface AuthUser {
 // ─── Account security / addresses / notifications / payment methods ───────────
 // (Backend endpoints for these may not exist yet — see functions below.)
 
-export interface Address {
-  id: string;
-  label: string;          // e.g. "Home", "Office"
-  name: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  is_default: boolean;
-}
-
-export type AddressBody = Omit<Address, 'id'>;
 
 export interface NotificationPreferences {
   order_updates: boolean;
@@ -201,16 +189,41 @@ export interface ApiOrder {
   items?: { product_name: string; quantity: number; unit_price: number }[];
 }
 
+export interface ApiAddress {
+  id: string;
+  label: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  street: string;
+  city: string;
+  state: string;
+  country?: string;
+  is_default: boolean;
+  created_at?: string;
+}
+
+export type AddressBody = {
+  label: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  street: string;
+  city: string;
+  state: string;
+  country?: string;
+  is_default?: boolean;
+};
+
 export interface CheckoutBody {
   items: { product_id: string; quantity: number }[];
-  shipping_address: {
-    name: string;
-    phone: string;
-    address: string;
+  delivery_address: {
+    recipient_name?: string;
+    recipient_phone?: string;
+    street: string;
     city: string;
     state: string;
+    country?: string;
   };
-  payment_method: 'card' | 'bank_transfer' | 'wallet';
+  payment_method: 'card' | 'bank_transfer' | 'pay_on_delivery';
   promo_code?: string;
 }
 
@@ -251,9 +264,16 @@ export interface ApiReview {
   id: string;
   rating: number;
   comment?: string;
-  is_verified_purchase: boolean;
-  user: { id: string; name: string; avatar?: string };
+  is_verified_purchase?: boolean;
+  reviewer: { id: string; first_name: string; last_name: string };
   created_at: string;
+}
+
+export interface ReviewSummary {
+  total_reviews: number;
+  avg_rating: number | null;
+  verified_count?: number;
+  breakdown: Record<string, number>;
 }
 
 export interface ApiGig {
@@ -453,21 +473,35 @@ export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
 export const updateMe = (body: { name?: string; phone?: string; avatar?: string }) =>
   authFetch<AuthUser>('/api/v1/users/me', { method: 'PUT', body: JSON.stringify(body) });
 
-//  Account security 
+// ─── Addresses ────────────────────────────────────────────────────────────────
+
+export const getMyAddresses = () =>
+  authFetch<ApiAddress[]>('/api/v1/users/me/addresses');
+
+export const createAddress = (body: AddressBody) =>
+  authFetch<ApiAddress>('/api/v1/users/me/addresses', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateAddress = (addressId: string, body: Partial<AddressBody>) =>
+  authFetch<ApiAddress>(`/api/v1/users/me/addresses/${addressId}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const deleteAddress = (addressId: string) =>
+  authFetch<void>(`/api/v1/users/me/addresses/${addressId}`, { method: 'DELETE' });
+
+export const setDefaultAddress = (addressId: string) =>
+  authFetch<ApiAddress>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
+
+//  Account security
 // NOTE: backend endpoints for these may not exist yet. Frontend is wired and
 // ready — once the routes below exist server-side, these "just work".
 
 export const changePassword = (body: { current_password: string; new_password: string }) =>
-  authFetch<{ message: string }>('/api/v1/users/me/password', {
-    method: 'PUT',
+  authFetch<{ message: string }>('/api/v1/auth/change-password', {
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 
-export const deleteAccount = (body?: { password?: string; reason?: string }) =>
-  authFetch<{ message: string }>('/api/v1/users/me', {
-    method: 'DELETE',
-    body: body ? JSON.stringify(body) : undefined,
-  });
+export const deleteAccount = () =>
+  authFetch<{ message: string }>('/api/v1/users/me', { method: 'DELETE' });
 
 //  Notification preferences 
 // NOTE: backend endpoints for these may not exist yet.
@@ -481,31 +515,7 @@ export const updateNotificationPreferences = (body: Partial<NotificationPreferen
     body: JSON.stringify(body),
   });
 
-//  Addresses 
-// NOTE: backend endpoints for these may not exist yet.
-
-export const getAddresses = () =>
-  authFetch<Address[]>('/api/v1/users/me/addresses');
-
-export const addAddress = (body: AddressBody) =>
-  authFetch<Address>('/api/v1/users/me/addresses', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-
-export const updateAddress = (addressId: string, body: Partial<AddressBody>) =>
-  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-
-export const deleteAddress = (addressId: string) =>
-  authFetch<void>(`/api/v1/users/me/addresses/${addressId}`, { method: 'DELETE' });
-
-export const setDefaultAddress = (addressId: string) =>
-  authFetch<Address>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
-
-//  Saved payment methods 
+//  Saved payment methods
 // NOTE: backend endpoints for these may not exist yet.
 // Paystack does not let you collect/store raw card numbers on your own
 // server (PCI-DSS) — the real integration pattern is:
@@ -570,10 +580,16 @@ export const fetchProductById = async (id: string): Promise<ApiProduct> => {
 export const fetchProductReviews = (productId: string, page = 1, limit = 20) =>
   publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/products/${productId}${buildQuery({ page, limit })}`);
 
+export const fetchProductReviewSummary = (productId: string) =>
+  publicFetch<ReviewSummary>(`/api/v1/reviews/products/${productId}/summary`);
+
 export const fetchStoreReviews = (storeId: string, page = 1, limit = 20) =>
   publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/stores/${storeId}${buildQuery({ page, limit })}`);
 
-export const addProductReview = (productId: string, body: { rating: number; comment?: string }) =>
+export const fetchStoreReviewSummary = (storeId: string) =>
+  publicFetch<ReviewSummary>(`/api/v1/reviews/stores/${storeId}/summary`);
+
+export const addProductReview = (productId: string, body: { rating: number; comment?: string; order_id?: string }) =>
   authFetch<ApiReview>(`/api/v1/reviews/products/${productId}`, { method: 'POST', body: JSON.stringify(body) });
 
 export const deleteProductReview = (reviewId: string) =>
