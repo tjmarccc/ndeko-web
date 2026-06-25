@@ -84,8 +84,6 @@ export interface AuthUser {
 }
 
 // ─── Account security / addresses / notifications / payment methods ───────────
-// (Backend endpoints for these may not exist yet — see functions below.)
-
 
 export interface NotificationPreferences {
   order_updates: boolean;
@@ -97,12 +95,11 @@ export interface NotificationPreferences {
 
 export interface SavedPaymentMethod {
   id: string;
-  card_type: string;        // 'visa' | 'mastercard' | 'verve' | ...
+  card_type: string;
   last_four: string;
   cardholder_name: string;
-  expiry: string;            // 'MM/YY'
+  expiry: string;
   is_default: boolean;
-  /** Paystack (or other gateway) authorization code used to charge this card later */
   authorization_code?: string;
 }
 
@@ -151,6 +148,22 @@ export interface ApiBusiness {
   status: 'pending' | 'verified' | 'rejected' | 'suspended';
 }
 
+export interface ApiStoreLocation {
+  id: string;
+  store_id: string;
+  branch_name: string;
+  branch_manager?: string | null;
+  street: string;
+  city: string;
+  state?: string | null;
+  phone: string;
+  email?: string | null;
+  opening_hours?: string | null;
+  is_primary: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ApiStore {
   id: string;
   business_id?: string;
@@ -174,6 +187,7 @@ export interface ApiStore {
   status: 'active' | 'inactive' | 'suspended';
   average_rating?: number;
   visitor_count?: number;
+  locations?: ApiStoreLocation[];
 }
 
 export interface ApiOrder {
@@ -387,7 +401,9 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
     throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
   }
 
-
+  // Unwrap the standard { success, message, data[, meta] } envelope.
+  // For paginated responses the server sends { data: T[], meta: { total, page, limit } }.
+  // We reassemble that into the PaginatedResponse shape the callers expect.
   const envelope = json as Record<string, unknown>;
   if (envelope?.data !== undefined) {
     if (envelope.meta && typeof envelope.meta === 'object') {
@@ -438,7 +454,7 @@ async function authFetch<T>(path: string, options: RequestInit = {}, retry = tru
   return json as T;
 }
 
-//  Auth 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const registerUser = (body: RegisterBody) =>
   publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
@@ -452,8 +468,8 @@ export const googleAuth = (body: { id_token: string; role?: string }) =>
 export const refreshToken = (body: { refresh_token: string }) =>
   publicFetch<AuthTokens>('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify(body) });
 
-export const logoutUser = (refreshTokenValue: string) =>
-  authFetch<void>('/api/v1/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshTokenValue }) });
+export const logoutUser = () =>
+  authFetch<void>('/api/v1/auth/logout', { method: 'POST' });
 
 export const verifyEmail = (token: string) =>
   publicFetch<void>(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`, {
@@ -466,7 +482,7 @@ export const forgotPassword = (email: string) =>
 export const resetPassword = (body: { email: string; otp: string; password: string }) =>
   publicFetch<void>('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify(body) });
 
-//  Users 
+// ─── Users ────────────────────────────────────────────────────────────────────
 
 export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
 
@@ -490,10 +506,6 @@ export const deleteAddress = (addressId: string) =>
 export const setDefaultAddress = (addressId: string) =>
   authFetch<ApiAddress>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
 
-//  Account security
-// NOTE: backend endpoints for these may not exist yet. Frontend is wired and
-// ready — once the routes below exist server-side, these "just work".
-
 export const changePassword = (body: { current_password: string; new_password: string }) =>
   authFetch<{ message: string }>('/api/v1/auth/change-password', {
     method: 'PATCH',
@@ -503,9 +515,6 @@ export const changePassword = (body: { current_password: string; new_password: s
 export const deleteAccount = () =>
   authFetch<{ message: string }>('/api/v1/users/me', { method: 'DELETE' });
 
-//  Notification preferences 
-// NOTE: backend endpoints for these may not exist yet.
-
 export const getNotificationPreferences = () =>
   authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences');
 
@@ -514,16 +523,6 @@ export const updateNotificationPreferences = (body: Partial<NotificationPreferen
     method: 'PUT',
     body: JSON.stringify(body),
   });
-
-//  Saved payment methods
-// NOTE: backend endpoints for these may not exist yet.
-// Paystack does not let you collect/store raw card numbers on your own
-// server (PCI-DSS) — the real integration pattern is:
-//   1. Frontend redirects to Paystack to add a card (a ₦0 or small auth charge)
-//   2. Paystack returns an `authorization_code` via webhook/callback
-//   3. Backend stores ONLY last_four/expiry/authorization_code, never the PAN
-// These endpoints assume the backend already has that flow; the frontend
-// here never collects/transmits a full card number to your own backend.
 
 export const getSavedPaymentMethods = () =>
   authFetch<SavedPaymentMethod[]>('/api/v1/users/me/payment-methods');
@@ -536,19 +535,17 @@ export const setDefaultPaymentMethod = (paymentMethodId: string) =>
     method: 'PATCH',
   });
 
-// Initiates Paystack's "add card" flow — backend returns a redirect URL,
-// same shape as your checkout `payment_url` pattern.
 export const initiateAddPaymentMethod = () =>
   authFetch<{ authorization_url: string }>('/api/v1/users/me/payment-methods/initiate', {
     method: 'POST',
   });
 
-// Categories 
+// ─── Categories ───────────────────────────────────────────────────────────────
 
 export const fetchCategories = (params?: { search?: string; parent_id?: string; page?: number; limit?: number }) =>
   publicFetch<PaginatedResponse<ApiCategory>>(`/api/v1/categories${buildQuery(params)}`);
 
-//  Products 
+// ─── Products ─────────────────────────────────────────────────────────────────
 
 export const fetchProducts = (params?: {
   page?: number;
@@ -575,7 +572,7 @@ export const fetchProductById = async (id: string): Promise<ApiProduct> => {
   return res as ApiProduct;
 };
 
-//  Reviews 
+// ─── Reviews ──────────────────────────────────────────────────────────────────
 
 export const fetchProductReviews = (productId: string, page = 1, limit = 20) =>
   publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/products/${productId}${buildQuery({ page, limit })}`);
@@ -601,10 +598,18 @@ export const addStoreReview = (storeId: string, body: { rating: number; comment?
 export const deleteStoreReview = (reviewId: string) =>
   authFetch<void>(`/api/v1/reviews/stores/reviews/${reviewId}`, { method: 'DELETE' });
 
-//  Wishlist 
+// ─── Wishlist ─────────────────────────────────────────────────────────────────
+
+export interface WishlistItem {
+  id: string;
+  user_id: string;
+  product_id: string;
+  created_at: string;
+  product: ApiProduct;
+}
 
 export const getWishlist = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
+  authFetch<PaginatedResponse<WishlistItem>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
 
 export const addToWishlist = (productId: string) =>
   authFetch<{ message: string }>('/api/v1/wishlists', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
@@ -612,7 +617,10 @@ export const addToWishlist = (productId: string) =>
 export const removeFromWishlist = (productId: string) =>
   authFetch<{ message: string }>(`/api/v1/wishlists/${productId}`, { method: 'DELETE' });
 
-//  Orders 
+export const checkWishlist = (productId: string) =>
+  authFetch<{ in_wishlist: boolean }>(`/api/v1/wishlists/check${buildQuery({ product_id: productId })}`);
+
+// ─── Orders ───────────────────────────────────────────────────────────────────
 
 export const checkout = (body: CheckoutBody) =>
   authFetch<{ orders: ApiOrder[]; payment_url?: string }>('/api/v1/orders/checkout', { method: 'POST', body: JSON.stringify(body) });
@@ -625,7 +633,7 @@ export const getOrder = (orderId: string) => authFetch<ApiOrder>(`/api/v1/orders
 export const cancelOrder = (orderId: string) =>
   authFetch<ApiOrder>(`/api/v1/orders/my/${orderId}/cancel`, { method: 'PATCH' });
 
-//  Businesses 
+// ─── Businesses ───────────────────────────────────────────────────────────────
 
 export const fetchFeaturedBusinesses = () => publicFetch<ApiBusiness[]>('/api/v1/businesses/featured');
 
@@ -634,7 +642,7 @@ export const getMyBusiness = () => authFetch<ApiBusiness>('/api/v1/businesses/my
 export const updateMyBusiness = (body: Partial<ApiBusiness>) =>
   authFetch<ApiBusiness>('/api/v1/businesses/my', { method: 'PUT', body: JSON.stringify(body) });
 
-//  Stores 
+// ─── Stores ───────────────────────────────────────────────────────────────────
 
 export const fetchPublicStores = (params?: {
   category_slug?: string;
@@ -648,26 +656,60 @@ export const fetchPublicStores = (params?: {
 
 export const getMyStores = () => authFetch<ApiStore[]>('/api/v1/stores/my');
 
+export interface StoreLocationBody {
+  branch_name: string;
+  street: string;
+  city: string;
+  phone: string;
+  state?: string;
+  branch_manager?: string;
+  email?: string;
+  opening_hours?: string;
+  is_primary?: boolean;
+}
+
 export type StoreBody = {
   store_name: string;
+  delivery_fee?: number;
+  location: StoreLocationBody;
   store_tagline?: string;
   category_slug?: string;
   description?: string;
-  city?: string;
-  state?: string;
-  contact_phone?: string;
-  contact_email?: string;
   whatsapp_number?: string;
   return_policy?: string;
   shipping_policy?: string;
-  delivery_fee?: number;
+  logo_url?: string;
+  banner_url?: string;
+};
+
+export type UploadContext = 'avatar' | 'store-logo' | 'store-banner' | 'product' | 'kyc';
+
+export interface UploadResult {
+  url: string;
+  public_id: string;
+  width: number;
+  height: number;
+  format: string;
+  size_bytes: number;
+}
+
+export const uploadImage = async (file: File, context: UploadContext = 'product'): Promise<UploadResult> => {
+  const form = new FormData();
+  form.append('file', file);
+  return authFetch<UploadResult>(`/api/v1/uploads?context=${context}`, { method: 'POST', body: form });
 };
 
 export const createStore = (body: StoreBody) =>
   authFetch<ApiStore>('/api/v1/stores', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateStore = (storeId: string, body: Partial<StoreBody>) =>
+export const updateStore = (storeId: string, body: Partial<Omit<StoreBody, 'location'>>) =>
   authFetch<ApiStore>(`/api/v1/stores/${storeId}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const createStoreLocation = (storeId: string, body: StoreLocationBody) =>
+  authFetch<unknown>(`/api/v1/stores/${storeId}/locations`, { method: 'POST', body: JSON.stringify(body) });
+
+export const updateStoreLocation = (storeId: string, locationId: string, body: Partial<StoreLocationBody>) =>
+  authFetch<unknown>(`/api/v1/stores/${storeId}/locations/${locationId}`, { method: 'PUT', body: JSON.stringify(body) });
 
 export const logStoreVisit = (storeId: string) => {
   const path = `/api/v1/stores/${storeId}/visitors`;
@@ -676,7 +718,7 @@ export const logStoreVisit = (storeId: string) => {
     : publicFetch<void>(path, { method: 'POST' });
 };
 
-//  Analytics 
+// ─── Analytics ────────────────────────────────────────────────────────────────
 
 export const getStoreDashboard = (storeId: string, from?: string, to?: string) =>
   authFetch<StoreDashboard>(`/api/v1/analytics/stores/${storeId}/dashboard${buildQuery({ from, to })}`);
@@ -687,7 +729,7 @@ export const getStoreSnapshots = (storeId: string, limit = 7) =>
 export const getTopProducts = (storeId: string, limit = 10) =>
   authFetch<ApiProduct[]>(`/api/v1/analytics/stores/${storeId}/top-products${buildQuery({ limit })}`);
 
-//  Wallet 
+// ─── Wallet ───────────────────────────────────────────────────────────────────
 
 export const getWallet = () => authFetch<Wallet>('/api/v1/wallet');
 
@@ -702,7 +744,7 @@ export const withdraw = (amount: number) =>
     method: 'POST', body: JSON.stringify({ amount }),
   });
 
-//    Seller products
+// ─── Seller products ──────────────────────────────────────────────────────────
 
 export const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -725,7 +767,18 @@ export const updateProduct = (storeId: string, productId: string, body: Partial<
 export const deleteProduct = (storeId: string, productId: string) =>
   authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
 
-//  Seller orders 
+export interface StoreProductStats {
+  total_products: number;
+  active_products: number;
+  out_of_stock: number;
+  low_stock: number;
+  inventory_value: number;
+}
+
+export const fetchStoreProductStats = (storeId: string) =>
+  authFetch<StoreProductStats>(`/api/v1/products/stores/${storeId}/stats`);
+
+// ─── Seller orders ────────────────────────────────────────────────────────────
 
 export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
   authFetch<PaginatedResponse<ApiOrder>>(`/api/v1/orders/stores/${storeId}${buildQuery({ page, limit })}`);
@@ -733,7 +786,7 @@ export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
 export const updateOrderStatus = (orderId: string, status: 'processing' | 'shipped' | 'delivered' | 'cancelled') =>
   authFetch<ApiOrder>(`/api/v1/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
 
-//  KYC 
+// ─── KYC ──────────────────────────────────────────────────────────────────────
 
 export const submitKyc = (body: { document_type: string; document_url: string; owner_type?: string; owner_id?: string }) =>
   authFetch<KycSubmission>('/api/v1/kyc', { method: 'POST', body: JSON.stringify(body) });
@@ -741,7 +794,7 @@ export const submitKyc = (body: { document_type: string; document_url: string; o
 export const getMyKyc = (page = 1, limit = 20) =>
   authFetch<PaginatedResponse<KycSubmission>>(`/api/v1/kyc/my${buildQuery({ page, limit })}`);
 
-//  Gigs 
+// ─── Gigs ─────────────────────────────────────────────────────────────────────
 
 export const fetchPublicGigs = (city?: string) => publicFetch<ApiGig[]>(`/api/v1/gigs${buildQuery({ city })}`);
 export const getGig = (gigId: string) => publicFetch<ApiGig>(`/api/v1/gigs/${gigId}`);
@@ -758,15 +811,18 @@ export const cancelGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gi
 export const getMyCreatedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
 export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/assigned${buildQuery({ page, limit })}`);
 
-//  Map ApiProduct → local Product 
+// ─── Map ApiProduct → local Product ──────────────────────────────────────────
 
 export function mapApiProduct(p: ApiProduct): Product {
-  const effectivePrice = p.discount_price ?? p.price;
+  const toNum = (v: unknown) => (v === null || v === undefined ? undefined : parseFloat(String(v)));
+  const price = toNum(p.price) ?? 0;
+  const discountPrice = toNum(p.discount_price);
+  const effectivePrice = discountPrice ?? price;
   return {
     id: p.id,
     name: p.name,
     price: effectivePrice,
-    originalPrice: p.discount_price ? p.price : undefined,
+    originalPrice: discountPrice ? price : undefined,
     image: p.images?.[0] || '/images/product-placeholder.webp',
     category: p.category?.slug ?? p.category?.id ?? '',
     rating: p.average_rating ?? 0,
@@ -774,8 +830,8 @@ export function mapApiProduct(p: ApiProduct): Product {
     description: p.description,
     brand: p.store?.store_name ?? '',
     inStock: ['in_stock', 'low_stock'].includes(p.stock_status),
-    discount: p.discount_price
-      ? Math.round((1 - p.discount_price / p.price) * 100)
+    discount: discountPrice && price
+      ? Math.round((1 - discountPrice / price) * 100)
       : undefined,
   };
 }

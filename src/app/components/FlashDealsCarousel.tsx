@@ -73,10 +73,7 @@ function DealCard({ product }: { product: Product }) {
     >
       {/* Wishlist */}
       <button
-        onClick={() => {
-          toggleWishlist(product);
-          toast.success(wished ? 'Removed from wishlist' : 'Added to wishlist');
-        }}
+        onClick={() => { toggleWishlist(product); }}
         className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110"
         style={{
           background: wished ? '#D4828F' : 'rgba(255,255,255,0.18)',

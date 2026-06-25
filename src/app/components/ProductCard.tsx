@@ -32,7 +32,6 @@ export function ProductCard({ product }: ProductCardProps) {
     e.preventDefault();
     e.stopPropagation();
     toggleWishlist(product);
-    toast.success(wished ? 'Removed from wishlist' : 'Added to wishlist');
   };
 
   // Resolve image: use product.image if valid, otherwise show placeholder UI

@@ -1,167 +1,82 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { Product } from '../types/product';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { toast } from 'sonner';
+import type { Product } from '../types/product';
 import {
+  addToWishlist as apiAdd,
+  removeFromWishlist as apiRemove,
   getWishlist,
-  addToWishlist as apiAddToWishlist,
-  removeFromWishlist as apiRemoveFromWishlist,
-  mapApiProduct,
   tokenStore,
-  ApiError,
-  type ApiProduct,
+  type WishlistItem,
 } from '../services/api';
 
 interface WishlistContextType {
-  wishlist: Product[];
-  loading: boolean;
-  error: string | null;
-  toggleWishlist: (product: Product) => void;
+  wishlistedIds: Set<string>;
+  toggleWishlist: (product: Product) => Promise<void>;
   isInWishlist: (id: string) => boolean;
-  removeFromWishlist: (id: string) => void;
-  /** ids currently mid-flight (add or remove) — useful for disabling buttons */
-  pendingIds: Set<string>;
+  removeFromWishlist: (id: string) => Promise<void>;
 }
 
 const WishlistContext = createContext<WishlistContextType | undefined>(undefined);
 
-const GUEST_STORAGE_KEY = 'ndeko_guest_wishlist';
-
-// ─── Guest (logged-out) fallback ───────────────────────────────────────────
-// Logged-out users can't hit the authenticated wishlist endpoints, so we keep
-// a small local-only list for them. The moment they log in, this is what the
-// API-backed wishlist replaces — guest data is intentionally NOT auto-merged
-// into the account wishlist, since silently merging anonymous local state
-// into a real account on login is a common source of surprising behavior.
-function readGuestWishlist(): Product[] {
-  try {
-    const raw = localStorage.getItem(GUEST_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Product[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeGuestWishlist(items: Product[]) {
-  localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(items));
-}
-
 export function WishlistProvider({ children }: { children: React.ReactNode }) {
-  const [wishlist, setWishlist] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [wishlistedIds, setWishlistedIds] = useState<Set<string>>(new Set());
 
-  // Track whether we're authenticated right now (re-checked on each call,
-  // since tokenStore can change without this component re-rendering).
-  const isAuthed = () => !!tokenStore.getAccess();
+  // On mount, if logged in, pre-populate so hearts render correctly
+  useEffect(() => {
+    if (!tokenStore.getAccess()) return;
+    getWishlist(1, 100)
+      .then(res => {
+        const ids = new Set(res.data.map((item: WishlistItem) => item.product_id));
+        setWishlistedIds(ids);
+      })
+      .catch(() => {});
+  }, []);
 
-  const setPending = (id: string, on: boolean) => {
-    setPendingIds((prev) => {
+  const toggleWishlist = useCallback(async (product: Product) => {
+    const already = wishlistedIds.has(product.id);
+    // Optimistic update
+    setWishlistedIds(prev => {
       const next = new Set(prev);
-      on ? next.add(id) : next.delete(id);
+      if (already) next.delete(product.id); else next.add(product.id);
       return next;
     });
-  };
-
-  // ── Load wishlist (API for logged-in users, localStorage for guests) ──
-  const load = useCallback(async () => {
-    if (!isAuthed()) {
-      setWishlist(readGuestWishlist());
-      setError(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
     try {
-      const res = await getWishlist(1, 100);
-      setWishlist(res.data.map((p: ApiProduct) => mapApiProduct(p)));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Failed to load wishlist');
-    } finally {
-      setLoading(false);
+      if (already) {
+        await apiRemove(product.id);
+        toast.success('Removed from wishlist');
+      } else {
+        await apiAdd(product.id);
+        toast.success('Added to wishlist');
+      }
+    } catch (e: unknown) {
+      // Roll back on failure
+      setWishlistedIds(prev => {
+        const next = new Set(prev);
+        if (already) next.add(product.id); else next.delete(product.id);
+        return next;
+      });
+      const msg = e instanceof Error ? e.message : '';
+      if (msg.includes('401') || msg.includes('403')) {
+        toast.error('Please log in to save items');
+      } else {
+        toast.error('Could not update wishlist');
+      }
+    }
+  }, [wishlistedIds]);
+
+  const removeFromWishlist = useCallback(async (id: string) => {
+    setWishlistedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    try {
+      await apiRemove(id);
+    } catch {
+      setWishlistedIds(prev => { const next = new Set(prev); next.add(id); return next; });
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Keep guest wishlist persisted whenever it changes (no-op once authed,
-  // since authed state is driven by the API, not this effect)
-  useEffect(() => {
-    if (!isAuthed()) {
-      writeGuestWishlist(wishlist);
-    }
-  }, [wishlist]);
-
-  const isInWishlist = (id: string) => wishlist.some((p) => p.id === id);
-
-  // ── Add ──
-  const add = async (product: Product) => {
-    if (!isAuthed()) {
-      setWishlist((prev) => (prev.some((p) => p.id === product.id) ? prev : [...prev, product]));
-      return;
-    }
-
-    // Optimistic add
-    setWishlist((prev) => (prev.some((p) => p.id === product.id) ? prev : [...prev, product]));
-    setPending(product.id, true);
-    try {
-      await apiAddToWishlist(product.id);
-    } catch (e) {
-      // Roll back on failure
-      setWishlist((prev) => prev.filter((p) => p.id !== product.id));
-      setError(e instanceof ApiError ? e.message : 'Failed to add to wishlist');
-      throw e;
-    } finally {
-      setPending(product.id, false);
-    }
-  };
-
-  // ── Remove ──
-  const remove = async (id: string) => {
-    if (!isAuthed()) {
-      setWishlist((prev) => prev.filter((p) => p.id !== id));
-      return;
-    }
-
-    // Optimistic remove — keep a copy in case we need to roll back
-    const removedItem = wishlist.find((p) => p.id === id);
-    setWishlist((prev) => prev.filter((p) => p.id !== id));
-    setPending(id, true);
-    try {
-      await apiRemoveFromWishlist(id);
-    } catch (e) {
-      // Roll back on failure
-      if (removedItem) {
-        setWishlist((prev) => (prev.some((p) => p.id === id) ? prev : [...prev, removedItem]));
-      }
-      setError(e instanceof ApiError ? e.message : 'Failed to remove from wishlist');
-      throw e;
-    } finally {
-      setPending(id, false);
-    }
-  };
-
-  const toggleWishlist = (product: Product) => {
-    if (isInWishlist(product.id)) {
-      remove(product.id).catch(() => {
-        // error already surfaced via `error` state; swallow here so callers
-        // (e.g. ProductCard's onClick) don't need to handle a rejected promise
-      });
-    } else {
-      add(product).catch(() => {});
-    }
-  };
-
-  const removeFromWishlist = (id: string) => {
-    remove(id).catch(() => {});
-  };
+  const isInWishlist = useCallback((id: string) => wishlistedIds.has(id), [wishlistedIds]);
 
   return (
-    <WishlistContext.Provider
-      value={{ wishlist, loading, error, toggleWishlist, isInWishlist, removeFromWishlist, pendingIds }}
-    >
+    <WishlistContext.Provider value={{ wishlistedIds, toggleWishlist, isInWishlist, removeFromWishlist }}>
       {children}
     </WishlistContext.Provider>
   );

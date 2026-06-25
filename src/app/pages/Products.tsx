@@ -2,8 +2,9 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { ProductCard } from '../components/ProductCard';
 import { Button } from '../components/ui/button';
+import { Checkbox } from '../components/ui/checkbox';
 import { Label } from '../components/ui/label';
-import { Input } from '../components/ui/input';
+import { Slider } from '../components/ui/slider';
 import { SlidersHorizontal, ChevronLeft, ChevronRight, X, Loader2, AlertCircle } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import {
@@ -18,8 +19,20 @@ import type { Product } from '../types/product';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 20;
-const MIN_PRICE = 500;
-const MAX_PRICE = 100_000_000; // naira
+const MAX_PRICE = 3_000_000; // naira
+
+// ─── Debounce hook ────────────────────────────────────────────────────────────
+// Returns a value that only updates after `delay` ms of no changes.
+// Used for the price slider so the API isn't called on every drag tick.
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
 
 // ─── Skeleton card ────────────────────────────────────────────────────────────
 
@@ -36,103 +49,6 @@ function SkeletonCard() {
   );
 }
 
-// ─── Min / Max price inputs ────────────────────────────────────────────────────
-//
-// Replaces the old dual-thumb slider. Each box holds local "draft" text state so
-// the user can freely type/clear/backspace without fighting a parsed number on
-// every keystroke. Values are parsed + clamped + committed only on blur or Enter,
-// which keeps re-renders of the product grid out of the typing path entirely.
-
-function PriceRangeInputs({
-  committedMin,
-  committedMax,
-  onCommit,
-  min,
-  max,
-}: {
-  committedMin: number;
-  committedMax: number;
-  onCommit: (range: [number, number]) => void;
-  min: number;
-  max: number;
-}) {
-  const [minDraft, setMinDraft] = useState(String(committedMin));
-  const [maxDraft, setMaxDraft] = useState(String(committedMax));
-
-  // Keep drafts in sync if committed values change from outside (e.g. Clear Filters)
-  useEffect(() => {
-    setMinDraft(String(committedMin));
-  }, [committedMin]);
-
-  useEffect(() => {
-    setMaxDraft(String(committedMax));
-  }, [committedMax]);
-
-  const commit = () => {
-    let parsedMin = parseInt(minDraft.replace(/[^0-9]/g, ''), 10);
-    let parsedMax = parseInt(maxDraft.replace(/[^0-9]/g, ''), 10);
-
-    if (Number.isNaN(parsedMin)) parsedMin = min;
-    if (Number.isNaN(parsedMax)) parsedMax = max;
-
-    parsedMin = Math.min(Math.max(parsedMin, min), max);
-    parsedMax = Math.min(Math.max(parsedMax, min), max);
-
-    // Don't allow min > max — swap or clamp so min always <= max
-    if (parsedMin > parsedMax) {
-      [parsedMin, parsedMax] = [parsedMax, parsedMin];
-    }
-
-    setMinDraft(String(parsedMin));
-    setMaxDraft(String(parsedMax));
-    onCommit([parsedMin, parsedMax]);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.currentTarget.blur();
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 min-w-0">
-        <Label htmlFor="price-min" className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
-          Min (₦)
-        </Label>
-        <Input
-          id="price-min"
-          type="text"
-          inputMode="numeric"
-          value={minDraft}
-          onChange={(e) => setMinDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKeyDown}
-          placeholder={String(min)}
-          className="text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-        />
-      </div>
-      <span className="text-gray-400 dark:text-gray-500 mt-5">–</span>
-      <div className="flex-1 min-w-0">
-        <Label htmlFor="price-max" className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
-          Max (₦)
-        </Label>
-        <Input
-          id="price-max"
-          type="text"
-          inputMode="numeric"
-          value={maxDraft}
-          onChange={(e) => setMaxDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKeyDown}
-          placeholder={String(max)}
-          className="text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-        />
-      </div>
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function Products() {
@@ -141,32 +57,15 @@ export function Products() {
   const categoryParam = searchParams.get('category') || '';
 
   // ── Filter / sort state ──
-  // selectedCategory is derived directly from the URL — the URL is the single
-  // source of truth, so there's no separate useState that can fall out of sync
-  // with it. Selecting a category writes to the URL; the URL is what we read.
-  const selectedCategory = categoryParam || 'all';
-
-  const setSelectedCategory = useCallback(
-    (value: string) => {
-      alert('setSelectedCategory called with: ' + value); // TEMP DEBUG — remove after testing
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (value === 'all') {
-          next.delete('category');
-        } else {
-          next.set('category', value);
-        }
-        return next;
-      });
-    },
-    [setSearchParams]
-  );
-
-  // committedPrice: the actual applied filter, only updates when the user blurs/Enters a box
-  const [committedPrice, setCommittedPrice] = useState<[number, number]>([MIN_PRICE, MAX_PRICE]);
+  const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam || 'all');
+  // priceRange is the live slider position (updates every tick for smooth UI)
+  const [priceRange, setPriceRange] = useState([0, MAX_PRICE]);
   const [sortBy, setSortBy] = useState('featured');
   const [filterOpen, setFilterOpen] = useState(true);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+
+  // ── Debounced price — only triggers API refetch after 400ms of no slider movement ──
+  const debouncedPrice = useDebounce(priceRange, 400);
 
   // ── Data state ──
   const [products, setProducts] = useState<Product[]>([]);
@@ -185,7 +84,7 @@ export function Products() {
   // ── Active filter count ──
   const activeFilterCount = [
     selectedCategory !== 'all' ? 1 : 0,
-    committedPrice[0] > MIN_PRICE || committedPrice[1] < MAX_PRICE ? 1 : 0,
+    priceRange[0] > 0 || priceRange[1] < MAX_PRICE ? 1 : 0,
   ].reduce((a, b) => a + b, 0);
 
   // ── Fetch categories ──
@@ -193,11 +92,13 @@ export function Products() {
     setCatLoading(true);
     fetchCategories({ limit: 50 })
       .then((res) => setCategories(res.data))
-      .catch(() => {/* silent */})
+      .catch(() => {/* silent – filters still usable */ })
       .finally(() => setCatLoading(false));
   }, []);
 
   // ── Fetch products ──
+  // NOTE: depends on `debouncedPrice`, NOT `priceRange`, so the API only
+  // fires after the user has stopped dragging the slider.
   const loadProducts = useCallback(
     async (page: number, append = false) => {
       abortRef.current?.abort();
@@ -212,25 +113,23 @@ export function Products() {
           limit: PAGE_SIZE,
         };
         if (selectedCategory !== 'all') params.category_slug = selectedCategory;
+        if (debouncedPrice[0] > 0) params.min_price = debouncedPrice[0];
+        if (debouncedPrice[1] < MAX_PRICE) params.max_price = debouncedPrice[1];
 
         const res = await fetchProducts(params);
 
         if ('data' in res) {
           const mapped = res.data.map(mapApiProduct);
 
-          // Filter by committedPrice (only changes when user commits min/max box)
-          const priceFiltered = mapped.filter(
-            (p) => (p.price ?? 0) >= committedPrice[0] && (p.price ?? 0) <= committedPrice[1]
-          );
-
+          // Client-side search filter only (price filtering delegated to backend)
           const searched = searchQuery
-            ? priceFiltered.filter(
-                (p) =>
-                  (p.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (p.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (p.brand ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-              )
-            : priceFiltered;
+            ? mapped.filter(
+              (p) =>
+                (p.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (p.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (p.brand ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            : mapped;
 
           setProducts((prev) => (append ? [...prev, ...searched] : searched));
           setTotalProducts(res.total ?? 0);
@@ -248,7 +147,8 @@ export function Products() {
         setLoadingMore(false);
       }
     },
-    [selectedCategory, committedPrice, searchQuery]
+    // debouncedPrice here (not priceRange) — prevents re-fetch on every slider tick
+    [selectedCategory, debouncedPrice, searchQuery]
   );
 
   // Re-fetch when filters/search change
@@ -257,26 +157,33 @@ export function Products() {
     loadProducts(1, false);
   }, [loadProducts]);
 
-  // ── Client-side sort ──
+  // Sync category param from URL
+  useEffect(() => {
+    setSelectedCategory(categoryParam || 'all');
+  }, [categoryParam]);
+
+  // ── Client-side sort (already loaded data) ──
   const sortedProducts = useMemo(() => {
     const copy = [...products];
     switch (sortBy) {
-      case 'price-low':  return copy.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+      case 'price-low': return copy.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
       case 'price-high': return copy.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
-      case 'rating':     return copy.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
-      case 'discount':   return copy.sort((a, b) => (b.discount ?? 0) - (a.discount ?? 0));
-      default:           return copy;
+      case 'rating': return copy.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+      case 'discount': return copy.sort((a, b) => (b.discount ?? 0) - (a.discount ?? 0));
+      default: return copy;
     }
   }, [products, sortBy]);
 
   const hasMore = products.length < totalProducts;
 
-  // ── Infinite scroll ──
+  // ── Infinite scroll via IntersectionObserver ──
   useEffect(() => {
     if (!loadMoreRef.current || !hasMore || loadingMore) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) loadProducts(currentPage + 1, true);
+        if (entries[0].isIntersecting) {
+          loadProducts(currentPage + 1, true);
+        }
       },
       { threshold: 0.1 }
     );
@@ -286,13 +193,13 @@ export function Products() {
 
   // ── Reset helpers ──
   const clearFilters = () => {
-    setSelectedCategory('all');
-    setCommittedPrice([MIN_PRICE, MAX_PRICE]);
+    setPriceRange([0, MAX_PRICE]);
     setMobileFilterOpen(false);
+    setSearchParams(p => { const n = new URLSearchParams(p); n.delete('category'); return n; });
   };
 
   // ── Filter panel ──
-  const FilterContent = () => (
+  const filterContent = (
     <>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -312,70 +219,81 @@ export function Products() {
         </button>
       </div>
 
-      {/* Categories — plain button list, each one independently sets selectedCategory,
-          which now writes straight to the URL. "All Categories" is just another
-          option in the same list/group. */}
+      {/* Categories */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Categories</h3>
         {catLoading ? (
           <div className="space-y-2">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+              <div key={i} className="h-5 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="space-y-1 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
-            <button
-              type="button"
-              onClick={() => {
-                alert('All Categories clicked'); // TEMP DEBUG — remove after testing
-                setSelectedCategory('all');
-              }}
-              aria-pressed={selectedCategory === 'all'}
-              className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
-                selectedCategory === 'all'
-                  ? 'bg-[#FDF2F4] dark:bg-[#8B1538]/30 text-[#8B1538] dark:text-[#F5A3B3] font-semibold'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300'
-              }`}
-            >
-              All Categories
-            </button>
-            {categories.map((cat) => {
-              const value = cat.slug ?? cat.id;
-              const isSelected = selectedCategory === cat.id || selectedCategory === cat.slug;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setSelectedCategory(value)}
-                  aria-pressed={isSelected}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm capitalize transition-colors ${
-                    isSelected
-                      ? 'bg-[#FDF2F4] dark:bg-[#8B1538]/30 text-[#8B1538] dark:text-[#F5A3B3] font-semibold'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300'
-                  }`}
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1 scrollbar-thin">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="cat-all"
+                checked={selectedCategory === 'all'}
+                onCheckedChange={() => {
+                  setSearchParams(p => { const n = new URLSearchParams(p); n.delete('category'); return n; });
+                }}
+              />
+              <Label htmlFor="cat-all" className="cursor-pointer dark:text-gray-300">
+                All Categories
+              </Label>
+            </div>
+            {categories.map((cat) => (
+              <div key={cat.id} className="flex items-center gap-2">
+                <Checkbox
+                  id={`cat-${cat.id}`}
+                  checked={selectedCategory === cat.id || selectedCategory === cat.slug}
+                  onCheckedChange={() => {
+                    const isActive = selectedCategory === cat.id || selectedCategory === cat.slug;
+                    setSearchParams(p => {
+                      const n = new URLSearchParams(p);
+                      if (isActive) n.delete('category');
+                      else n.set('category', cat.slug ?? cat.id);
+                      return n;
+                    });
+                  }}
+                />
+                <Label
+                  htmlFor={`cat-${cat.id}`}
+                  className="cursor-pointer dark:text-gray-300 capitalize"
                 >
                   {cat.name}
-                </button>
-              );
-            })}
+                </Label>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Price range — two number boxes instead of a slider */}
+      {/* Price range */}
       <div className="mb-6">
         <h3 className="font-semibold mb-3 dark:text-white">Price Range</h3>
-        <PriceRangeInputs
-          committedMin={committedPrice[0]}
-          committedMax={committedPrice[1]}
-          onCommit={setCommittedPrice}
-          min={MIN_PRICE}
+        {/*
+          Slider updates `priceRange` on every drag tick (smooth UI feedback).
+          The API only re-fetches when `debouncedPrice` settles (400ms after release).
+        */}
+        <Slider
+          value={priceRange}
+          onValueChange={setPriceRange}
           max={MAX_PRICE}
+          step={1000}
+          className="mb-3"
         />
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
-          Press Enter or click away to apply
-        </p>
+        <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300">
+          <span>₦{(priceRange[0] ?? 0).toLocaleString()}</span>
+          <span>₦{(priceRange[1] ?? MAX_PRICE).toLocaleString()}</span>
+        </div>
+        {/* Visual indicator that filter is pending (slider moved but debounce hasn't fired) */}
+        {(priceRange[0] !== debouncedPrice[0] || priceRange[1] !== debouncedPrice[1]) && (
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Applying filter…
+          </p>
+        )}
       </div>
 
       <Button
@@ -409,7 +327,7 @@ export function Products() {
                 pointerEvents: filterOpen ? 'auto' : 'none',
               }}
             >
-              <FilterContent />
+              {filterContent}
             </div>
           </aside>
 
@@ -424,7 +342,7 @@ export function Products() {
             className="fixed top-0 left-0 h-full w-[min(288px,85vw)] bg-white dark:bg-gray-800 z-50 p-5 overflow-y-auto shadow-2xl lg:hidden transition-transform duration-300"
             style={{ transform: mobileFilterOpen ? 'translateX(0)' : 'translateX(-100%)' }}
           >
-            <FilterContent />
+            {filterContent}
           </aside>
 
           {/* ── Products Grid ── */}
@@ -469,8 +387,8 @@ export function Products() {
                     {searchQuery
                       ? `Results for "${searchQuery}"`
                       : categoryParam
-                      ? (categories.find((c) => c.id === categoryParam || c.slug === categoryParam)?.name ?? 'Products')
-                      : 'All Products'}
+                        ? (categories.find((c) => c.id === categoryParam || c.slug === categoryParam)?.name ?? 'Products')
+                        : 'All Products'}
                   </h1>
                   <p className="text-gray-500 dark:text-gray-400 text-xs">
                     {loading ? 'Loading…' : `${(totalProducts ?? 0).toLocaleString()} products found`}

@@ -20,6 +20,16 @@ import {
   type NotificationPreferences, type SavedPaymentMethod,
 } from '../services/api';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface SavedCard {
+  id: string;
+  number: string;
+  name: string;
+  expiry: string;
+  type: string;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const tabs = [
@@ -31,21 +41,22 @@ const tabs = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-const NOTIFICATION_META: { id: keyof NotificationPreferences; label: string; desc: string }[] = [
-  { id: 'order_updates', label: 'Order Updates', desc: 'Shipping and delivery notifications' },
-  { id: 'deals', label: 'Flash Deals & Offers', desc: 'Exclusive discounts and cashback alerts' },
-  { id: 'wishlist', label: 'Wishlist Restocks', desc: 'When wishlisted items are back in stock' },
-  { id: 'newsletter', label: 'Newsletter', desc: 'Weekly top picks and curated deals' },
-  { id: 'sms', label: 'SMS Notifications', desc: 'Text alerts for important updates' },
+const notificationSettings = [
+  { id: 'order_updates', label: 'Order Updates', desc: 'Shipping and delivery notifications', defaultOn: true },
+  { id: 'deals', label: 'Flash Deals & Offers', desc: 'Exclusive discounts and cashback alerts', defaultOn: true },
+  { id: 'wishlist', label: 'Wishlist Restocks', desc: 'When wishlisted items are back in stock', defaultOn: false },
+  { id: 'newsletter', label: 'Newsletter', desc: 'Weekly top picks and curated deals', defaultOn: false },
+  { id: 'sms', label: 'SMS Notifications', desc: 'Text alerts for important updates', defaultOn: true },
 ];
 
-const DEFAULT_NOTIF_PREFS: NotificationPreferences = {
-  order_updates: true,
-  deals: true,
-  wishlist: false,
-  newsletter: false,
-  sms: true,
-};
+function formatCardNumber(value: string) {
+  return value.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+}
+function formatExpiry(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 4);
+  if (digits.length >= 3) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return digits;
+}
 
 function getStatusColor(status: string) {
   switch (status) {
@@ -66,13 +77,7 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-function errMsg(e: unknown, fallback: string) {
-  if (e instanceof ApiError) return e.message || fallback;
-  if (e instanceof Error) return e.message || fallback;
-  return fallback;
-}
-
-// ─── Shared sub-components ─────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
@@ -88,89 +93,192 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => vo
   );
 }
 
-function SuccessBanner({ message }: { message: string }) {
-  return (
-    <div className="flex items-center gap-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/10 dark:border-emerald-900/30 text-sm text-emerald-700 dark:text-emerald-400">
-      <Check className="h-4 w-4 flex-shrink-0" />
-      <span className="flex-1">{message}</span>
-    </div>
-  );
-}
-
 function Spinner({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   const cls = size === 'sm' ? 'h-4 w-4' : 'h-8 w-8';
   return <Loader2 className={`${cls} animate-spin text-[#8B1538]`} />;
 }
 
-// ─── Confirm dialog (for destructive actions) ──────────────────────────────────
-
-function ConfirmDialog({
-  title,
-  description,
-  confirmLabel,
-  requireText,
-  danger = true,
-  loading,
-  error,
-  onConfirm,
-  onCancel,
+function AddPaymentModal({
+  onClose,
+  onAdd,
 }: {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  requireText?: string; // if set, user must type this exact text to confirm
-  danger?: boolean;
-  loading: boolean;
-  error: string;
-  onConfirm: () => void;
-  onCancel: () => void;
+  onClose: () => void;
+  onAdd: (card: { number: string; name: string; expiry: string }) => void;
 }) {
-  const [typed, setTyped] = useState('');
-  const canConfirm = !requireText || typed === requireText;
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardName, setCardName] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [cvv, setCvv] = useState('');
+  const [cardType, setCardType] = useState<'verve' | 'visa' | 'mastercard'>('verve');
+  const [saved, setSaved] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaved(true);
+    setTimeout(() => {
+      onAdd({ number: cardNumber, name: cardName, expiry });
+      onClose();
+    }, 900);
+  };
+
+  const detectCardType = (num: string) => {
+    const digits = num.replace(/\s/g, '');
+    if (digits.startsWith('4')) return 'visa';
+    if (digits.startsWith('5')) return 'mastercard';
+    return 'verve';
+  };
+
+  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatCardNumber(e.target.value);
+    setCardNumber(formatted);
+    setCardType(detectCardType(formatted));
+  };
+
+  const cardTypeLabel = { visa: 'VISA', mastercard: 'Mastercard', verve: 'Verve' }[cardType];
+  const cardTypeColor = { visa: '#1A1F71', mastercard: '#EB001B', verve: '#8B1538' }[cardType];
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onCancel}>
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+      onClick={onClose}
+    >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-sm shadow-2xl p-6"
+        className="bg-white dark:bg-gray-900 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="font-bold text-lg dark:text-white mb-2">{title}</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{description}</p>
+        {/* drag handle on mobile */}
+        <div className="flex justify-center pt-3 sm:hidden">
+          <div className="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+        </div>
 
-        {requireText && (
-          <div className="mb-4">
-            <Label className="text-xs text-gray-500 dark:text-gray-400 mb-1.5 block">
-              Type <span className="font-mono font-bold">{requireText}</span> to confirm
-            </Label>
+        <div
+          className="px-6 py-5 flex items-center justify-between"
+          style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
+        >
+          <div>
+            <h2 className="text-white font-bold text-lg">Add Payment Method</h2>
+            <p className="text-white/70 text-xs mt-0.5">Your card details are encrypted & secure</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
+          >
+            <X className="h-4 w-4 text-white" />
+          </button>
+        </div>
+
+        <div className="px-6 pt-6">
+          <div
+            className="rounded-2xl p-5 mb-5 relative overflow-hidden"
+            style={{ background: `linear-gradient(135deg, ${cardTypeColor}, ${cardTypeColor}99)`, minHeight: 120 }}
+          >
+            <div
+              className="absolute inset-0 opacity-10"
+              style={{ backgroundImage: `radial-gradient(circle at 80% 50%, white 0%, transparent 60%)` }}
+            />
+            <div className="relative flex flex-col justify-between h-full" style={{ minHeight: 110 }}>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-1">
+                  <div className="w-7 h-5 rounded-sm bg-yellow-300/80" />
+                  <div className="w-7 h-5 rounded-sm bg-yellow-400/40" />
+                </div>
+                <span className="text-white/80 text-xs font-bold tracking-wider">{cardTypeLabel}</span>
+              </div>
+              <div className="mt-4">
+                <p className="text-white/60 text-xs mb-1 tracking-widest">CARD NUMBER</p>
+                <p className="text-white font-mono text-base tracking-widest">
+                  {cardNumber || '•••• •••• •••• ••••'}
+                </p>
+              </div>
+              <div className="flex items-end justify-between mt-3">
+                <div>
+                  <p className="text-white/50 text-xs mb-0.5">CARDHOLDER</p>
+                  <p className="text-white text-sm font-semibold">{cardName || 'YOUR NAME'}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-white/50 text-xs mb-0.5">EXPIRES</p>
+                  <p className="text-white text-sm font-mono">{expiry || 'MM/YY'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 pb-8 space-y-4">
+          <div>
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Card Number</Label>
             <Input
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              className="dark:bg-gray-800 dark:border-gray-700"
-              autoFocus
+              placeholder="0000 0000 0000 0000"
+              value={cardNumber}
+              onChange={handleCardNumberChange}
+              className="font-mono tracking-wider dark:bg-gray-800 dark:border-gray-700"
+              required
+              maxLength={19}
             />
           </div>
-        )}
+          <div>
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Cardholder Name</Label>
+            <Input
+              placeholder="Name as on card"
+              value={cardName}
+              onChange={(e) => setCardName(e.target.value.toUpperCase())}
+              required
+              className="dark:bg-gray-800 dark:border-gray-700"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Expiry Date</Label>
+              <Input
+                placeholder="MM/YY"
+                value={expiry}
+                onChange={(e) => setExpiry(formatExpiry(e.target.value))}
+                maxLength={5}
+                required
+                className="dark:bg-gray-800 dark:border-gray-700"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">CVV</Label>
+              <div className="relative">
+                <Input
+                  placeholder="•••"
+                  value={cvv}
+                  onChange={(e) => setCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  type="password"
+                  required
+                  className="dark:bg-gray-800 dark:border-gray-700"
+                />
+                <Lock className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+              </div>
+            </div>
+          </div>
 
-        {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
+          <p className="flex items-center gap-2 text-xs text-gray-400">
+            <Lock className="h-3 w-3 text-[#3D9B8E]" />
+            256-bit SSL encryption · PCI DSS compliant
+          </p>
 
-        <div className="flex gap-3">
-          <Button variant="outline" className="flex-1" onClick={onCancel} disabled={loading}>
-            Cancel
-          </Button>
-          <Button
-            className={`flex-1 ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-[#8B1538] hover:bg-[#6B0F2A]'}`}
-            onClick={onConfirm}
-            disabled={loading || !canConfirm}
+          <button
+            type="submit"
+            disabled={saved}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-white font-bold text-sm transition-all duration-300"
+            style={{
+              background: saved
+                ? 'linear-gradient(135deg, #3D9B8E, #2F7A6F)'
+                : 'linear-gradient(135deg, #8B1538, #D4828F)',
+              boxShadow: '0 4px 20px rgba(139,21,56,0.3)',
+            }}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : confirmLabel}
-          </Button>
-        </div>
+            {saved ? <><Check className="h-4 w-4" /> Card Saved!</> : <><Plus className="h-4 w-4" /> Save Card</>}
+          </button>
+        </form>
       </div>
     </div>
   );
 }
 
-// ─── Tab: Profile ───────────────────────────────────────────────────────────────
+// ─── Tab panels ───────────────────────────────────────────────────────────────
 
 function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) => void }) {
   const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
@@ -189,8 +297,8 @@ function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) 
       onSaved(updated);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2500);
-    } catch (e) {
-      setError(errMsg(e, 'Failed to save changes'));
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to save changes');
     } finally {
       setSaving(false);
     }
@@ -244,8 +352,6 @@ function ProfileTab({ user, onSaved }: { user: AuthUser; onSaved: (u: AuthUser) 
   );
 }
 
-// ─── Tab: Orders ────────────────────────────────────────────────────────────────
-
 function OrdersTab() {
   const [orders, setOrders] = useState<ApiOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -261,8 +367,8 @@ function OrdersTab() {
       const res = await getMyOrders(p, LIMIT);
       setOrders(res.data);
       setTotal(res.total);
-    } catch (e) {
-      setError(errMsg(e, 'Failed to load orders'));
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load orders');
     } finally {
       setLoading(false);
     }
@@ -1018,6 +1124,21 @@ export function Account() {
   const [userLoading, setUserLoading] = useState(!tokenStore.getUser());
   const [userError, setUserError] = useState('');
 
+  // Payment cards (local only — no payment cards API)
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([
+    { id: '1', number: '4521', name: 'CHIDI NDEKO', expiry: '09/28', type: 'Verve' },
+  ]);
+
+  // Notifications (local only)
+  const [notifState, setNotifState] = useState<Record<string, boolean>>(
+    Object.fromEntries(notificationSettings.map((n) => [n.id, n.defaultOn]))
+  );
+
+  // Settings
+  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
   // Load real user on mount
   useEffect(() => {
     const cached = tokenStore.getUser();
@@ -1028,18 +1149,24 @@ export function Account() {
         setUser(u);
       })
       .catch((e) => {
-        if (!cached) setUserError(errMsg(e, 'Failed to load profile'));
+        if (!cached) setUserError(e.message ?? 'Failed to load profile');
       })
       .finally(() => setUserLoading(false));
   }, []);
+
+  const handleAddCard = (card: { number: string; name: string; expiry: string }) => {
+    const lastFour = card.number.replace(/\s/g, '').slice(-4);
+    setSavedCards((prev) => [
+      ...prev,
+      { id: String(Date.now()), number: lastFour, name: card.name, expiry: card.expiry, type: 'Card' },
+    ]);
+  };
 
   const handleSignOut = async () => {
     try {
       const refresh = tokenStore.getRefresh();
       if (refresh) await logoutUser(refresh);
-    } catch {
-      // best-effort — clear local session regardless
-    }
+    } catch {}
     tokenStore.clear();
     navigate('/login');
   };
@@ -1126,6 +1253,11 @@ export function Account() {
         </button>
       </div>
 
+      {/* Add payment modal */}
+      {showAddPayment && (
+        <AddPaymentModal onClose={() => setShowAddPayment(false)} onAdd={handleAddCard} />
+      )}
+
       {/* Mobile sidebar drawer */}
       {sidebarOpen && (
         <div
@@ -1194,13 +1326,110 @@ export function Account() {
           {active === 'orders' && <OrdersTab />}
 
           {/* ── Addresses ── */}
-          {active === 'addresses' && <AddressesTab />}
+          {active === 'addresses' && (
+            <div className="space-y-4">
+              <h2 className="font-bold dark:text-white text-lg">Saved Addresses</h2>
+              <div className="p-4 border dark:border-gray-700 rounded-xl">
+                <p className="font-semibold dark:text-white">Home</p>
+                <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
+                  12 Adeola Odeku Street, Victoria Island, Lagos
+                </p>
+              </div>
+              <Button className="bg-[#3D9B8E] hover:bg-[#2F7A6F] w-full sm:w-auto">
+                <Plus className="h-4 w-4 mr-2" /> Add New Address
+              </Button>
+            </div>
+          )}
 
           {/* ── Payment Methods ── */}
-          {active === 'payment' && <PaymentMethodsTab />}
+          {active === 'payment' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-bold dark:text-white text-lg">Payment Methods</h2>
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Lock className="h-3 w-3 text-[#3D9B8E]" /> Secured
+                </span>
+              </div>
+
+              {savedCards.map((card) => (
+                <div
+                  key={card.id}
+                  className="p-4 border dark:border-gray-700 rounded-xl flex items-center justify-between group hover:border-[#8B1538]/40 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center"
+                      style={{ background: 'linear-gradient(135deg, #8B153820, #D4828F20)' }}
+                    >
+                      <CreditCard className="h-5 w-5 text-[#8B1538]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold dark:text-white text-sm truncate">
+                        {card.type} •••• {card.number}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Expires {card.expiry} · {card.name}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSavedCards((prev) => prev.filter((c) => c.id !== card.id))}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-all flex-shrink-0 ml-2"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+
+              <button
+                onClick={() => setShowAddPayment(true)}
+                className="w-full flex items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed border-[#8B1538]/30 text-[#8B1538] hover:border-[#8B1538] hover:bg-[#8B1538]/5 transition-all text-sm font-semibold"
+              >
+                <Plus className="h-4 w-4" /> Add Payment Method
+              </button>
+
+              <p className="text-xs text-gray-400 text-center">
+                We accept Verve, Visa, Mastercard and bank transfers
+              </p>
+            </div>
+          )}
 
           {/* ── Notifications ── */}
-          {active === 'notifications' && <NotificationsTab />}
+          {active === 'notifications' && (
+            <div className="space-y-5 max-w-lg">
+              <h2 className="font-bold dark:text-white text-lg">Notification Preferences</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Manage how Ndeko Express contacts you about deals, orders, and updates.
+              </p>
+              <div className="space-y-3">
+                {notificationSettings.map((n) => (
+                  <div
+                    key={n.id}
+                    className="flex items-center justify-between p-4 rounded-xl border dark:border-gray-700 hover:border-[#8B1538]/30 transition-colors gap-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm dark:text-white">{n.label}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => setNotifState((prev) => ({ ...prev, [n.id]: !prev[n.id] }))}
+                      className="relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0"
+                      style={{ background: notifState[n.id] ? '#8B1538' : '#E5E7EB' }}
+                      aria-label={`Toggle ${n.label}`}
+                    >
+                      <span
+                        className="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
+                        style={{ left: notifState[n.id] ? '1.5rem' : '0.25rem' }}
+                      />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <Button className="bg-[#8B1538] hover:bg-[#6B0F2A] w-full sm:w-auto">
+                Save Preferences
+              </Button>
+            </div>
+          )}
 
           {/* ── Settings ── */}
           {active === 'settings' && <SettingsTab onAccountDeleted={handleAccountDeleted} onPasswordChanged={handlePasswordChanged} />}
