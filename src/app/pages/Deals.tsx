@@ -157,7 +157,7 @@ export function Deals() {
       // fetchProducts returns PaginatedResponse<ApiProduct> when no id is passed
       const paginated = res as { data: ApiProduct[]; total: number };
       const mapped = paginated.data
-        .filter((p) => p.discount && p.discount > 0)
+        .filter((p) => p.discount_price && p.discount_price > 0)
         .map(mapApiProduct);
 
       setAllDeals((prev) => (append ? [...prev, ...mapped] : mapped));

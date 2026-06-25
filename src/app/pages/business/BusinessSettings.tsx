@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Store, Lock, Bell, CreditCard, Globe, Shield, Check,
-  ChevronRight, Upload, Loader2, AlertCircle, RefreshCw, Eye, EyeOff,
+  ChevronRight, Loader2, AlertCircle, RefreshCw, Eye, EyeOff,
 } from 'lucide-react';
 import {
   getMyStores,
   updateStore,
   fetchCategories,
   getWallet,
-  getWalletTransactions,
   saveBankDetails,
   withdraw,
   updateMe,
-  getMe,
   type ApiStore,
   type ApiCategory,
 } from '../../services/api';
@@ -163,7 +161,7 @@ function StoreProfileSection() {
         store_name: form.store_name,
         description: form.description,
         city: form.city,
-        logo_url: form.logo_url_url,
+        logo_url: form.logo_url,
         ...(selectedCat ? { category_slug: selectedCat.slug } : {}),
       } as any);
       setStore(updated); setOriginal(form);
@@ -195,7 +193,7 @@ function StoreProfileSection() {
           <p className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Store Logo</p>
           <p className="text-xs text-gray-400 mb-2">Paste an image URL below to update your logo.</p>
           <input
-            type="url" value={form.logo_url} onChange={set('logo')}
+            type="url" value={form.logo_url} onChange={set('logo_url')}
             placeholder="https://…"
             className={`${inputCls} text-xs`}
           />
@@ -346,7 +344,7 @@ function PayoutsSection() {
   const [wallet,         setWallet]         = useState<any>(null);
   const [bankName,       setBankName]       = useState('GTBank');
   const [accountNumber,  setAccountNumber]  = useState('');
-  const [accountName,    setAccountName]    = useState('');
+  const [accountName] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [loading,        setLoading]        = useState(true);
   const [bankSaveState,  setBankSaveState]  = useState<SaveState>('idle');

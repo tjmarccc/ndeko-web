@@ -178,7 +178,6 @@ export function HeroCarousel() {
   const [current, setCurrent] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const [contentKey, setContentKey] = useState(0);
-  const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const goTo = (index: number) => {
