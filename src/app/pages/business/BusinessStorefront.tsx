@@ -109,8 +109,6 @@ function CategoryPicker({ selected, options, onChange }: CategoryPickerProps) {
   );
 }
 
-
-
 interface FieldProps {
   label: string;
   required?: boolean;
@@ -799,7 +797,7 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function apiLocationToLocal(l: ApiStoreLocation): Location {
   return {
@@ -837,6 +835,8 @@ function storeToForm(store: ApiStore): StoreForm {
   };
 }
 
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export function BusinessStorefront() {
   const [view, setView] = useState<'loading' | 'empty' | 'form'>('loading');
   const [showModal, setShowModal] = useState(false);
@@ -847,33 +847,45 @@ export function BusinessStorefront() {
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 
-  useEffect(() => {
-    getMyStores()
-      .then(stores => {
-        const list = Array.isArray(stores) ? stores : (stores as { data?: ApiStore[] }).data ?? [];
-        if (list.length > 0) {
-          const store = list[0];
-          const f = storeToForm(store);
-          setStoreId(store.id);
-          setForm(f);
-          setOriginalForm(JSON.parse(JSON.stringify(f)));
-          setView('form');
-        } else {
-          setView('empty');
-        }
-      })
-      .catch(() => setView('empty'));
+  // ── Shared fetch-and-hydrate logic ─────────────────────────────────────────
+  const loadStores = useCallback(async () => {
+    const stores = await getMyStores();
+    const list = Array.isArray(stores) ? stores : (stores as { data?: ApiStore[] }).data ?? [];
+    if (list.length > 0) {
+      const store = list[0];
+      const f = storeToForm(store);
+      setStoreId(store.id);
+      setForm(f);
+      setOriginalForm(JSON.parse(JSON.stringify(f)));
+      setIsDirty(false);
+      setView('form');
+    } else {
+      setView('empty');
+    }
   }, []);
 
-  const handleStoreCreated = useCallback((store: ApiStore) => {
-    const f = storeToForm(store);
-    setStoreId(store.id);
-    setForm(f);
-    setOriginalForm(JSON.parse(JSON.stringify(f)));
-    setIsDirty(false);
-    setView('form');
+  useEffect(() => {
+    loadStores().catch(() => setView('empty'));
+  }, [loadStores]);
+
+  // ── After wizard creates store, re-fetch to get fully-hydrated data ────────
+  // The POST /stores response doesn't include joined locations/category, so we
+  // call getMyStores() again to guarantee the form reflects what's on the backend.
+  const handleStoreCreated = useCallback(async (_store: ApiStore) => {
     setShowModal(false);
-  }, []);
+    setView('loading');
+    try {
+      await loadStores();
+    } catch {
+      // Fallback: use the bare create response so at least something renders
+      const f = storeToForm(_store);
+      setStoreId(_store.id);
+      setForm(f);
+      setOriginalForm(JSON.parse(JSON.stringify(f)));
+      setIsDirty(false);
+      setView('form');
+    }
+  }, [loadStores]);
 
   const setField = (key: keyof StoreForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setForm(prev => {
