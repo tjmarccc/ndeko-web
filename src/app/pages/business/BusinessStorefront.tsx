@@ -13,8 +13,16 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  'Electronics', 'Fashion', 'Food & Beverages', 'Health & Beauty',
-  'Home & Garden', 'Sports', 'Books', 'Automotive', 'Services', 'Other',
+  'Electronics & Technology',
+  'Food & Beverages',
+  'Health & Beauty',
+  'Home & Living',
+  'Industrial & Manufacturing',
+  'Automotive',
+  'Agriculture',
+  'Office Supplies',
+  'Digital Products & Services',
+  'Other',
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -508,7 +516,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   const [categoryOptions, setCategoryOptions] = useState<string[]>(CATEGORIES);
   const [wizard, setWizard] = useState({
     store_name: '', category_slug: '', tagline: '', description: '',
-
     whatsapp_number: '', return_policy: '', shipping_policy: '',
     logo_url: '', banner_url: '',
     locations: [makeLocation(true)],
@@ -543,8 +550,7 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   const primaryLoc = wizard.locations.find(l => l.isPrimary) ?? wizard.locations[0];
   const extraLocs = wizard.locations.filter(l => l !== primaryLoc);
 
-  const canNext =
-    wizard.store_name.trim().length > 0;
+  const canNext = wizard.store_name.trim().length > 0;
 
   const canCreate =
     primaryLoc?.branchName.trim() &&
@@ -582,7 +588,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
         banner_url: wizard.banner_url || undefined,
       });
 
-      // Add additional locations sequentially
       for (const loc of extraLocs) {
         if (!loc.branchName || !loc.streetAddress || !loc.city || !loc.phone) continue;
         await createStoreLocation(store.id, {
@@ -649,12 +654,9 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
         <div className="px-4 sm:px-6 py-4 sm:py-5 overflow-y-auto flex-1 overscroll-contain">
           {step === 1 ? (
             <div className="space-y-3 sm:space-y-4">
-              {/* Required fields */}
               <Field label="Store Name" required>
                 <input className={inputCls} value={wizard.store_name} onChange={setW('store_name')} placeholder="e.g. TechHub Lagos" />
               </Field>
-
-              {/* Optional fields */}
               <Field label="Category">
                 <select className={`${inputCls} bg-white`} value={wizard.category_slug} onChange={setW('category_slug')}>
                   <option value="">Select category…</option>
@@ -810,7 +812,6 @@ export function BusinessStorefront() {
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 
-  // Load existing store on mount
   useEffect(() => {
     getMyStores()
       .then(stores => {
@@ -925,7 +926,6 @@ export function BusinessStorefront() {
           <CreateStoreModal onClose={() => setShowModal(false)} onCreated={handleStoreCreated} />
         )}
 
-        {/* Breadcrumb */}
         <p className="text-xs text-gray-400 mb-0.5">
           Business Portal › <span className="text-[#8B1538] font-semibold">Storefront</span>
         </p>
