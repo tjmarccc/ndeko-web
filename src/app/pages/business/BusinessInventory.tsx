@@ -228,7 +228,6 @@ function ProductModal({
               </select>
             </div>
 
-
             <div className="inv-field inv-field--full">
               <label>Product Images (up to {MAX_PRODUCT_IMAGES})</label>
               <ProductImageUploader
@@ -248,6 +247,23 @@ function ProductModal({
       </div>
     </div>
   );
+}
+
+// ─── Pagination helper ────────────────────────────────────────────────────────
+// Produces a compact page-number array with ellipsis gaps, e.g.:
+//   [1, '…', 4, 5, 6, '…', 20]
+// Always shows first + last page; shows current ±1; collapses the rest.
+
+function getPageNumbers(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | '…')[] = [1];
+  if (current > 3) pages.push('…');
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+    pages.push(i);
+  }
+  if (current < total - 2) pages.push('…');
+  pages.push(total);
+  return pages;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -290,7 +306,6 @@ export function BusinessInventory() {
         if (first) {
           setStoreId(first);
         } else {
-          // No stores — stop loading so the UI isn't stuck on a spinner
           setLoading(false);
           setLoadError('No stores found. Create a store to manage inventory.');
         }
@@ -324,6 +339,12 @@ export function BusinessInventory() {
   }, [storeId, page]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
+
+  // Reset to page 1 when store switches
+  const handleStoreChange = (id: string) => {
+    setStoreId(id);
+    setPage(1);
+  };
 
   // Client-side filter
   const filtered = products.filter(p => {
@@ -371,6 +392,7 @@ export function BusinessInventory() {
   };
 
   const totalPages = Math.ceil((total ?? 0) / LIMIT);
+  const pageNumbers = getPageNumbers(page, totalPages);
 
   return (
     <>
@@ -607,10 +629,65 @@ export function BusinessInventory() {
 
         /* ── Pagination ──────────────────────────── */
         .inv-pagination {
-          display: flex; align-items: center; justify-content: center; gap: 8px;
-          padding: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          padding: 14px 20px;
           border-top: 1px solid var(--gray-100);
-          font-size: 13px; color: var(--gray-500);
+          flex-wrap: wrap;
+        }
+        .inv-pagination__info {
+          font-size: 12px;
+          color: var(--gray-400);
+          margin-left: 8px;
+        }
+        .inv-page-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 34px;
+          height: 34px;
+          padding: 0 8px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1.5px solid transparent;
+          transition: background .15s, border-color .15s, color .15s, transform .1s;
+          background: transparent;
+          color: var(--gray-700);
+        }
+        .inv-page-btn:hover:not(:disabled):not(.inv-page-btn--active) {
+          background: var(--gray-100);
+          border-color: var(--gray-200);
+        }
+        .inv-page-btn:active:not(:disabled) { transform: scale(.95); }
+        .inv-page-btn:disabled { opacity: .4; cursor: not-allowed; }
+        .inv-page-btn--active {
+          background: var(--brand);
+          color: #fff;
+          border-color: var(--brand);
+          cursor: default;
+        }
+        .inv-page-btn--nav {
+          background: var(--gray-100);
+          color: var(--gray-700);
+          border-color: var(--gray-200);
+        }
+        .inv-page-btn--nav:hover:not(:disabled) {
+          background: var(--gray-200);
+          border-color: var(--gray-300);
+        }
+        .inv-page-ellipsis {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 28px;
+          height: 34px;
+          font-size: 13px;
+          color: var(--gray-400);
+          user-select: none;
         }
 
         /* ── Error banner ────────────────────────── */
@@ -760,12 +837,11 @@ export function BusinessInventory() {
 
         {/* Controls */}
         <div className="inv-controls">
-          {/* Store switcher */}
           {stores.length > 1 && (
             <select
               className="inv-store-select"
               value={storeId ?? ''}
-              onChange={e => { setStoreId(e.target.value); setPage(1); }}
+              onChange={e => handleStoreChange(e.target.value)}
             >
               {stores.map(s => <option key={s.id} value={s.id}>{s.store_name}</option>)}
             </select>
@@ -949,26 +1025,50 @@ export function BusinessInventory() {
                 ))}
               </div>
 
-              {/* Pagination */}
+              {/* ── Pagination ── */}
               {totalPages > 1 && (
                 <div className="inv-pagination">
+                  {/* Prev */}
                   <button
-                    className="inv-btn inv-btn--ghost"
-                    style={{ padding: '7px 10px' }}
+                    className="inv-page-btn inv-page-btn--nav"
                     disabled={page <= 1}
                     onClick={() => setPage(p => p - 1)}
+                    aria-label="Previous page"
                   >
                     <ChevronLeft style={{ width: 14, height: 14 }} />
                   </button>
-                  <span>Page {page} of {totalPages}</span>
+
+                  {/* Numbered pages */}
+                  {pageNumbers.map((p, i) =>
+                    p === '…' ? (
+                      <span key={`ellipsis-${i}`} className="inv-page-ellipsis">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={`inv-page-btn${p === page ? ' inv-page-btn--active' : ''}`}
+                        onClick={() => setPage(p as number)}
+                        aria-label={`Page ${p}`}
+                        aria-current={p === page ? 'page' : undefined}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+
+                  {/* Next */}
                   <button
-                    className="inv-btn inv-btn--ghost"
-                    style={{ padding: '7px 10px' }}
+                    className="inv-page-btn inv-page-btn--nav"
                     disabled={page >= totalPages}
                     onClick={() => setPage(p => p + 1)}
+                    aria-label="Next page"
                   >
                     <ChevronRight style={{ width: 14, height: 14 }} />
                   </button>
+
+                  {/* Summary */}
+                  <span className="inv-pagination__info">
+                    {((page - 1) * LIMIT) + 1}–{Math.min(page * LIMIT, total)} of {total.toLocaleString()}
+                  </span>
                 </div>
               )}
             </>
