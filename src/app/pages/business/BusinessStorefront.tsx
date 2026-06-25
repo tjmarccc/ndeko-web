@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  createStore, createStoreLocation, updateStore, fetchCategories, uploadImage, getMyStores,
+  createStore, createStoreLocation, updateStore, updateStoreLocation, fetchCategories, uploadImage, getMyStores,
   type ApiStore, type ApiStoreLocation, type StoreLocationBody, type UploadContext,
 } from '../../services/api';
 
@@ -892,6 +892,7 @@ export function BusinessStorefront() {
     setSaving(true);
     setSaveState('idle');
     try {
+      // Save store-level fields
       await updateStore(storeId, {
         store_name: form.store_name,
         store_tagline: form.tagline || undefined,
@@ -902,6 +903,45 @@ export function BusinessStorefront() {
         logo_url: form.logo || undefined,
         banner_url: form.cover_image || undefined,
       });
+
+      // Update existing locations (real API UUIDs — not prefixed with 'loc_')
+      await Promise.all(
+        form.locations
+          .filter(loc => !loc.id.startsWith('loc_'))
+          .map(loc =>
+            updateStoreLocation(storeId, loc.id, {
+              branch_name: loc.branchName,
+              street: loc.streetAddress,
+              city: loc.city,
+              phone: loc.phone,
+              state: loc.state || undefined,
+              branch_manager: loc.branchManager || undefined,
+              email: loc.email || undefined,
+              opening_hours: loc.openingHours || undefined,
+              is_primary: loc.isPrimary,
+            })
+          )
+      );
+
+      // Create newly added locations (local ids start with 'loc_')
+      await Promise.all(
+        form.locations
+          .filter(loc => loc.id.startsWith('loc_'))
+          .map(loc =>
+            createStoreLocation(storeId, {
+              branch_name: loc.branchName,
+              street: loc.streetAddress,
+              city: loc.city,
+              phone: loc.phone,
+              state: loc.state || undefined,
+              branch_manager: loc.branchManager || undefined,
+              email: loc.email || undefined,
+              opening_hours: loc.openingHours || undefined,
+              is_primary: loc.isPrimary,
+            })
+          )
+      );
+
       setOriginalForm(JSON.parse(JSON.stringify(form)));
       setIsDirty(false);
       setSaveState('saved');
