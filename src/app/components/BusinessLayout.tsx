@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Package, ShoppingBag, Store, BarChart3,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { NdekoLogo } from './NdekoLogo';
 import { useAuth } from '../contexts/AuthContext';
+import { getMyBusiness } from '../services/api';
 
 const navItems = [
   { label: 'Dashboard', path: '/business', icon: LayoutDashboard },
@@ -29,13 +30,23 @@ export function BusinessLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [businessName, setBusinessName] = useState<string | null>(null);
 
-  const displayName = user
+  useEffect(() => {
+    getMyBusiness()
+      .then((b) => setBusinessName(b.business_name))
+      .catch(() => {});
+  }, []);
+
+  const personalName = user
     ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email
     : '—';
-  const initials = user
-    ? `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase() || '?'
-    : '?';
+  const displayName = businessName ?? personalName;
+  const initials = displayName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '?';
 
   const handleSignOut = async () => {
     setProfileOpen(false);
