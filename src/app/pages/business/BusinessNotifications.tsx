@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ShoppingBag, AlertTriangle, Star, TrendingUp,
-  Bell, Check, Trash2, Filter, Loader2, RefreshCw,
+  Bell, Check, Trash2, Filter, RefreshCw,
 } from 'lucide-react';
 
 // ─── API layer ────────────────────────────────────────────────────────────────
@@ -166,11 +166,11 @@ function deriveNotifications(
   // Orders → recent status changes
   for (const o of orders) {
     const statusMessages: Partial<Record<ApiOrder['status'], { title: string; msg: string }>> = {
-      pending:    { title: 'New Order Received', msg: `Order #${o.order_number} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
+      pending: { title: 'New Order Received', msg: `Order #${o.order_number} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
       processing: { title: 'Order in Processing', msg: `Order #${o.order_number} (₦${o.total_amount.toLocaleString()}) is being prepared.` },
-      shipped:    { title: 'Order Shipped', msg: `Order #${o.order_number} has been picked up by the courier.` },
-      delivered:  { title: 'Order Delivered', msg: `Order #${o.order_number} was delivered successfully.` },
-      cancelled:  { title: 'Order Cancelled', msg: `Order #${o.order_number} was cancelled.` },
+      shipped: { title: 'Order Shipped', msg: `Order #${o.order_number} has been picked up by the courier.` },
+      delivered: { title: 'Order Delivered', msg: `Order #${o.order_number} was delivered successfully.` },
+      cancelled: { title: 'Order Cancelled', msg: `Order #${o.order_number} was cancelled.` },
     };
     const cfg = statusMessages[o.status];
     if (cfg) {
@@ -266,11 +266,11 @@ function savePersisted(state: PersistedState) {
 // ─── Type config ──────────────────────────────────────────────────────────────
 
 const TYPE_CFG: Record<NotifType, { icon: React.ElementType; color: string; bg: string; label: string }> = {
-  order:  { icon: ShoppingBag,   color: '#8B1538', bg: '#FDF2F4', label: 'Orders'  },
-  stock:  { icon: AlertTriangle, color: '#D97706', bg: '#FFFBEB', label: 'Stock'   },
-  review: { icon: Star,          color: '#6366F1', bg: '#EEF2FF', label: 'Reviews' },
-  payout: { icon: TrendingUp,    color: '#3D9B8E', bg: '#F0FDFA', label: 'Payouts' },
-  system: { icon: Bell,          color: '#D4828F', bg: '#FDF2F8', label: 'System'  },
+  order: { icon: ShoppingBag, color: '#8B1538', bg: '#FDF2F4', label: 'Orders' },
+  stock: { icon: AlertTriangle, color: '#D97706', bg: '#FFFBEB', label: 'Stock' },
+  review: { icon: Star, color: '#6366F1', bg: '#EEF2FF', label: 'Reviews' },
+  payout: { icon: TrendingUp, color: '#3D9B8E', bg: '#F0FDFA', label: 'Payouts' },
+  system: { icon: Bell, color: '#D4828F', bg: '#FDF2F8', label: 'System' },
 };
 
 const FILTER_TYPES: Array<'all' | NotifType> = ['all', 'order', 'stock', 'review', 'payout', 'system'];
@@ -320,13 +320,13 @@ export function BusinessNotifications() {
         getWalletTransactions(1, 10),
       ]);
 
-      const orders  = ordersRes.status   === 'fulfilled' ? ordersRes.value.data ?? []   : [];
-      const products= productsRes.status === 'fulfilled' ? productsRes.value.data ?? [] : [];
-      const reviews = reviewsRes.status  === 'fulfilled' ? reviewsRes.value.data ?? []  : [];
-      const wallet  = walletRes.status   === 'fulfilled' ? walletRes.value.data ?? []   : [];
+      const orders = ordersRes.status === 'fulfilled' ? ordersRes.value.data ?? [] : [];
+      const products = productsRes.status === 'fulfilled' ? productsRes.value.data ?? [] : [];
+      const reviews = reviewsRes.status === 'fulfilled' ? reviewsRes.value.data ?? [] : [];
+      const wallet = walletRes.status === 'fulfilled' ? walletRes.value.data ?? [] : [];
 
       const derived = deriveNotifications(orders, products, reviews, wallet);
-      const state   = loadPersisted();
+      const state = loadPersisted();
       setPersisted(state);
       setNotifications(applyPersisted(derived, state));
     } catch (e) {

@@ -52,7 +52,7 @@ function SkeletonCard() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function Products() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('search') || '';
   const categoryParam = searchParams.get('category') || '';
 
@@ -92,7 +92,7 @@ export function Products() {
     setCatLoading(true);
     fetchCategories({ limit: 50 })
       .then((res) => setCategories(res.data))
-      .catch(() => {/* silent – filters still usable */})
+      .catch(() => {/* silent – filters still usable */ })
       .finally(() => setCatLoading(false));
   }, []);
 
@@ -113,26 +113,23 @@ export function Products() {
           limit: PAGE_SIZE,
         };
         if (selectedCategory !== 'all') params.category_slug = selectedCategory;
+        if (debouncedPrice[0] > 0) params.min_price = debouncedPrice[0];
+        if (debouncedPrice[1] < MAX_PRICE) params.max_price = debouncedPrice[1];
 
         const res = await fetchProducts(params);
 
         if ('data' in res) {
           const mapped = res.data.map(mapApiProduct);
 
-          // Client-side price filter using the debounced value
-          const priceFiltered = mapped.filter(
-            (p) => (p.price ?? 0) >= debouncedPrice[0] && (p.price ?? 0) <= debouncedPrice[1]
-          );
-
-          // Client-side search filter
+          // Client-side search filter only (price filtering delegated to backend)
           const searched = searchQuery
-            ? priceFiltered.filter(
-                (p) =>
-                  (p.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (p.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (p.brand ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-              )
-            : priceFiltered;
+            ? mapped.filter(
+              (p) =>
+                (p.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (p.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (p.brand ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            : mapped;
 
           setProducts((prev) => (append ? [...prev, ...searched] : searched));
           setTotalProducts(res.total ?? 0);
@@ -196,13 +193,13 @@ export function Products() {
 
   // ── Reset helpers ──
   const clearFilters = () => {
-    setSelectedCategory('all');
     setPriceRange([0, MAX_PRICE]);
     setMobileFilterOpen(false);
+    setSearchParams(p => { const n = new URLSearchParams(p); n.delete('category'); return n; });
   };
 
   // ── Filter panel ──
-  const FilterContent = () => (
+  const filterContent = (
     <>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -237,7 +234,9 @@ export function Products() {
               <Checkbox
                 id="cat-all"
                 checked={selectedCategory === 'all'}
-                onCheckedChange={() => setSelectedCategory('all')}
+                onCheckedChange={() => {
+                  setSearchParams(p => { const n = new URLSearchParams(p); n.delete('category'); return n; });
+                }}
               />
               <Label htmlFor="cat-all" className="cursor-pointer dark:text-gray-300">
                 All Categories
@@ -248,13 +247,15 @@ export function Products() {
                 <Checkbox
                   id={`cat-${cat.id}`}
                   checked={selectedCategory === cat.id || selectedCategory === cat.slug}
-                  onCheckedChange={() =>
-                    setSelectedCategory(
-                      selectedCategory === cat.id || selectedCategory === cat.slug
-                        ? 'all'
-                        : cat.slug ?? cat.id
-                    )
-                  }
+                  onCheckedChange={() => {
+                    const isActive = selectedCategory === cat.id || selectedCategory === cat.slug;
+                    setSearchParams(p => {
+                      const n = new URLSearchParams(p);
+                      if (isActive) n.delete('category');
+                      else n.set('category', cat.slug ?? cat.id);
+                      return n;
+                    });
+                  }}
                 />
                 <Label
                   htmlFor={`cat-${cat.id}`}
@@ -326,7 +327,7 @@ export function Products() {
                 pointerEvents: filterOpen ? 'auto' : 'none',
               }}
             >
-              <FilterContent />
+              {filterContent}
             </div>
           </aside>
 
@@ -341,7 +342,7 @@ export function Products() {
             className="fixed top-0 left-0 h-full w-[min(288px,85vw)] bg-white dark:bg-gray-800 z-50 p-5 overflow-y-auto shadow-2xl lg:hidden transition-transform duration-300"
             style={{ transform: mobileFilterOpen ? 'translateX(0)' : 'translateX(-100%)' }}
           >
-            <FilterContent />
+            {filterContent}
           </aside>
 
           {/* ── Products Grid ── */}
@@ -386,8 +387,8 @@ export function Products() {
                     {searchQuery
                       ? `Results for "${searchQuery}"`
                       : categoryParam
-                      ? (categories.find((c) => c.id === categoryParam || c.slug === categoryParam)?.name ?? 'Products')
-                      : 'All Products'}
+                        ? (categories.find((c) => c.id === categoryParam || c.slug === categoryParam)?.name ?? 'Products')
+                        : 'All Products'}
                   </h1>
                   <p className="text-gray-500 dark:text-gray-400 text-xs">
                     {loading ? 'Loading…' : `${(totalProducts ?? 0).toLocaleString()} products found`}

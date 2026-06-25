@@ -128,6 +128,22 @@ export interface ApiBusiness {
   status: 'pending' | 'verified' | 'rejected' | 'suspended';
 }
 
+export interface ApiStoreLocation {
+  id: string;
+  store_id: string;
+  branch_name: string;
+  branch_manager?: string | null;
+  street: string;
+  city: string;
+  state?: string | null;
+  phone: string;
+  email?: string | null;
+  opening_hours?: string | null;
+  is_primary: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ApiStore {
   id: string;
   business_id?: string;
@@ -151,6 +167,7 @@ export interface ApiStore {
   status: 'active' | 'inactive' | 'suspended';
   average_rating?: number;
   visitor_count?: number;
+  locations?: ApiStoreLocation[];
 }
 
 export interface ApiOrder {
@@ -399,8 +416,8 @@ export const googleAuth = (body: { id_token: string; role?: string }) =>
 export const refreshToken = (body: { refresh_token: string }) =>
   publicFetch<AuthTokens>('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify(body) });
 
-export const logoutUser = (refreshTokenValue: string) =>
-  authFetch<void>('/api/v1/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshTokenValue }) });
+export const logoutUser = () =>
+  authFetch<void>('/api/v1/auth/logout', { method: 'POST' });
 
 export const verifyEmail = (token: string) =>
   publicFetch<void>(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`, {
@@ -474,14 +491,25 @@ export const deleteStoreReview = (reviewId: string) =>
 
 // ─── Wishlist ─────────────────────────────────────────────────────────────────
 
+export interface WishlistItem {
+  id: string;
+  user_id: string;
+  product_id: string;
+  created_at: string;
+  product: ApiProduct;
+}
+
 export const getWishlist = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
+  authFetch<PaginatedResponse<WishlistItem>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
 
 export const addToWishlist = (productId: string) =>
   authFetch<{ message: string }>('/api/v1/wishlists', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
 
 export const removeFromWishlist = (productId: string) =>
   authFetch<{ message: string }>(`/api/v1/wishlists/${productId}`, { method: 'DELETE' });
+
+export const checkWishlist = (productId: string) =>
+  authFetch<{ in_wishlist: boolean }>(`/api/v1/wishlists/check${buildQuery({ product_id: productId })}`);
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
@@ -519,26 +547,60 @@ export const fetchPublicStores = (params?: {
 
 export const getMyStores = () => authFetch<ApiStore[]>('/api/v1/stores/my');
 
+export interface StoreLocationBody {
+  branch_name: string;
+  street: string;
+  city: string;
+  phone: string;
+  state?: string;
+  branch_manager?: string;
+  email?: string;
+  opening_hours?: string;
+  is_primary?: boolean;
+}
+
 export type StoreBody = {
   store_name: string;
+  delivery_fee?: number;
+  location: StoreLocationBody;
   store_tagline?: string;
   category_slug?: string;
   description?: string;
-  city?: string;
-  state?: string;
-  contact_phone?: string;
-  contact_email?: string;
   whatsapp_number?: string;
   return_policy?: string;
   shipping_policy?: string;
-  delivery_fee?: number;
+  logo_url?: string;
+  banner_url?: string;
+};
+
+export type UploadContext = 'avatar' | 'store-logo' | 'store-banner' | 'product' | 'kyc';
+
+export interface UploadResult {
+  url: string;
+  public_id: string;
+  width: number;
+  height: number;
+  format: string;
+  size_bytes: number;
+}
+
+export const uploadImage = async (file: File, context: UploadContext = 'product'): Promise<UploadResult> => {
+  const form = new FormData();
+  form.append('file', file);
+  return authFetch<UploadResult>(`/api/v1/uploads?context=${context}`, { method: 'POST', body: form });
 };
 
 export const createStore = (body: StoreBody) =>
   authFetch<ApiStore>('/api/v1/stores', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateStore = (storeId: string, body: Partial<StoreBody>) =>
+export const updateStore = (storeId: string, body: Partial<Omit<StoreBody, 'location'>>) =>
   authFetch<ApiStore>(`/api/v1/stores/${storeId}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const createStoreLocation = (storeId: string, body: StoreLocationBody) =>
+  authFetch<unknown>(`/api/v1/stores/${storeId}/locations`, { method: 'POST', body: JSON.stringify(body) });
+
+export const updateStoreLocation = (storeId: string, locationId: string, body: Partial<StoreLocationBody>) =>
+  authFetch<unknown>(`/api/v1/stores/${storeId}/locations/${locationId}`, { method: 'PUT', body: JSON.stringify(body) });
 
 export const logStoreVisit = (storeId: string) => {
   const path = `/api/v1/stores/${storeId}/visitors`;
@@ -596,6 +658,17 @@ export const updateProduct = (storeId: string, productId: string, body: Partial<
 export const deleteProduct = (storeId: string, productId: string) =>
   authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
 
+export interface StoreProductStats {
+  total_products: number;
+  active_products: number;
+  out_of_stock: number;
+  low_stock: number;
+  inventory_value: number;
+}
+
+export const fetchStoreProductStats = (storeId: string) =>
+  authFetch<StoreProductStats>(`/api/v1/products/stores/${storeId}/stats`);
+
 // ─── Seller orders ────────────────────────────────────────────────────────────
 
 export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
@@ -632,12 +705,15 @@ export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedRe
 // ─── Map ApiProduct → local Product ──────────────────────────────────────────
 
 export function mapApiProduct(p: ApiProduct): Product {
-  const effectivePrice = p.discount_price ?? p.price;
+  const toNum = (v: unknown) => (v === null || v === undefined ? undefined : parseFloat(String(v)));
+  const price = toNum(p.price) ?? 0;
+  const discountPrice = toNum(p.discount_price);
+  const effectivePrice = discountPrice ?? price;
   return {
     id: p.id,
     name: p.name,
     price: effectivePrice,
-    originalPrice: p.discount_price ? p.price : undefined,
+    originalPrice: discountPrice ? price : undefined,
     image: p.images?.[0] || '/images/product-placeholder.webp',
     category: p.category?.slug ?? p.category?.id ?? '',
     rating: p.average_rating ?? 0,
@@ -645,8 +721,8 @@ export function mapApiProduct(p: ApiProduct): Product {
     description: p.description,
     brand: p.store?.store_name ?? '',
     inStock: ['in_stock', 'low_stock'].includes(p.stock_status),
-    discount: p.discount_price
-      ? Math.round((1 - p.discount_price / p.price) * 100)
+    discount: discountPrice && price
+      ? Math.round((1 - discountPrice / price) * 100)
       : undefined,
   };
 }

@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Plus, Edit, Trash2, AlertTriangle, Package,
   DollarSign, Filter, RefreshCw, X, ChevronLeft,
-  ChevronRight, Loader2, CheckCircle, XCircle,
+  ChevronRight, Loader2, CheckCircle, XCircle, Camera,
 } from 'lucide-react';
 import {
   ApiError,
@@ -12,10 +12,83 @@ import {
   updateProduct,
   deleteProduct,
   fetchCategories,
+  fetchStoreProductStats,
+  uploadImage,
   type ApiProduct,
   type ApiStore,
   type ApiCategory,
+  type StoreProductStats,
 } from '../../services/api';
+
+// ─── Product Image Uploader ───────────────────────────────────────────────────
+
+const MAX_PRODUCT_IMAGES = 6;
+const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/gif';
+
+function ProductImageUploader({ images, onChange }: { images: string[]; onChange: (urls: string[]) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const remaining = MAX_PRODUCT_IMAGES - images.length;
+    const toUpload = files.slice(0, remaining);
+    setUploadError('');
+    setUploading(true);
+    try {
+      const urls = await Promise.all(
+        toUpload.map(async f => {
+          if (f.size > 5 * 1024 * 1024) throw new Error(`${f.name} exceeds 5 MB`);
+          const res = await uploadImage(f, 'product');
+          return res.url;
+        })
+      );
+      onChange([...images, ...urls]);
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const remove = (idx: number) => onChange(images.filter((_, i) => i !== idx));
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {images.map((url, i) => (
+          <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200 group">
+            <img src={url} alt={`Product ${i + 1}`} className="w-full h-full object-cover" />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+            >
+              <X style={{ width: 14, height: 14, color: 'white' }} />
+            </button>
+          </div>
+        ))}
+        {images.length < MAX_PRODUCT_IMAGES && (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-[#8B1538] hover:text-[#8B1538] transition-colors disabled:opacity-50"
+          >
+            {uploading ? <Loader2 style={{ width: 18, height: 18 }} className="animate-spin" /> : <Camera style={{ width: 18, height: 18 }} />}
+            {!uploading && <span style={{ fontSize: 9 }}>Upload</span>}
+          </button>
+        )}
+      </div>
+      {uploadError && <p style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{uploadError}</p>}
+      <p style={{ fontSize: 11, color: '#9ca3af' }}>{images.length}/{MAX_PRODUCT_IMAGES} images — JPEG, PNG, WebP or GIF · max 5 MB each</p>
+      <input ref={inputRef} type="file" accept={ACCEPTED_TYPES} multiple className="hidden" onChange={handleFiles} />
+    </div>
+  );
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -45,8 +118,8 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
 
 interface ProductFormData {
   name: string; description: string; price: string;
-  discount_price: string; stock_quantity: string;
-  category_id: string; images: string;
+  discount_price: string; cost_price: string; stock_quantity: string;
+  category_id: string; images: string[]; is_active: boolean;
 }
 
 function ProductModal({
@@ -64,9 +137,11 @@ function ProductModal({
     description: product?.description ?? '',
     price: product?.price ? String(product.price) : '',
     discount_price: product?.discount_price ? String(product.discount_price) : '',
+    cost_price: '',
     stock_quantity: product?.stock_quantity ? String(product.stock_quantity) : '',
     category_id: product?.category?.id ?? (categories[0]?.id ?? ''),
-    images: product?.images?.join(', ') ?? '',
+    images: product?.images ?? [],
+    is_active: product?.is_active ?? true,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -84,12 +159,14 @@ function ProductModal({
     try {
       const body = {
         name: form.name.trim(),
-        description: form.description.trim(),
+        description: form.description.trim() || undefined,
         price: parseFloat(form.price),
         discount_price: form.discount_price ? parseFloat(form.discount_price) : undefined,
+        cost_price: form.cost_price ? parseFloat(form.cost_price) : undefined,
         stock_quantity: parseInt(form.stock_quantity, 10),
-        category_id: form.category_id,
-        images: form.images.split(',').map(s => s.trim()).filter(Boolean),
+        category_id: form.category_id || undefined,
+        images: form.images,
+        is_active: form.is_active,
       };
       const saved = mode === 'add'
         ? await createProduct(storeId, body)
@@ -135,6 +212,11 @@ function ProductModal({
             </div>
 
             <div className="inv-field">
+              <label>Cost Price (₦) <span style={{ color: '#9ca3af', fontWeight: 400 }}>— private</span></label>
+              <input type="number" value={form.cost_price} onChange={set('cost_price')} placeholder="0.00" min="0" />
+            </div>
+
+            <div className="inv-field">
               <label>Stock Quantity *</label>
               <input type="number" value={form.stock_quantity} onChange={set('stock_quantity')} placeholder="0" min="0" />
             </div>
@@ -146,9 +228,13 @@ function ProductModal({
               </select>
             </div>
 
+
             <div className="inv-field inv-field--full">
-              <label>Image URLs (comma-separated)</label>
-              <input value={form.images} onChange={set('images')} placeholder="https://img1.jpg, https://img2.jpg" />
+              <label>Product Images (up to {MAX_PRODUCT_IMAGES})</label>
+              <ProductImageUploader
+                images={form.images}
+                onChange={urls => setForm(f => ({ ...f, images: urls }))}
+              />
             </div>
           </div>
         </div>
@@ -181,6 +267,8 @@ export function BusinessInventory() {
   const [total, setTotal] = useState(0);
   const LIMIT = 20;
 
+  const [stats, setStats] = useState<StoreProductStats | null>(null);
+
   const [modal, setModal] = useState<{ mode: 'add' | 'edit'; product?: ApiProduct } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -212,6 +300,12 @@ export function BusinessInventory() {
       }
     })();
   }, []);
+
+  // Fetch server-side stats whenever the active store changes
+  useEffect(() => {
+    if (!storeId) return;
+    fetchStoreProductStats(storeId).then(setStats).catch(() => setStats(null));
+  }, [storeId]);
 
   // Load products when storeId / page changes
   const loadProducts = useCallback(async () => {
@@ -246,10 +340,10 @@ export function BusinessInventory() {
     return matchSearch && matchCat && matchStatus;
   });
 
-  // Stats
-  const totalValue = products.reduce((s, p) => s + (p.price ?? 0) * (p.stock_quantity ?? 0), 0);
-  const lowStockCount = products.filter(p => p.stock_status === 'low_stock').length;
-  const outOfStockCount = products.filter(p => p.stock_status === 'out_of_stock').length;
+  // Stats — from server; fall back to client-side counts only if stats not loaded yet
+  const totalValue = stats?.inventory_value ?? 0;
+  const lowStockCount = stats?.low_stock ?? products.filter(p => p.stock_status === 'low_stock').length;
+  const outOfStockCount = stats?.out_of_stock ?? products.filter(p => p.stock_status === 'out_of_stock').length;
 
   const handleDelete = async (productId: string) => {
     if (!storeId) return;
@@ -267,7 +361,6 @@ export function BusinessInventory() {
   };
 
   const handleSaved = (saved: ApiProduct) => {
-    // Capture mode before clearing modal to avoid stale state in toast message
     const savedMode = modal?.mode;
     setProducts(ps => {
       const exists = ps.find(p => p.id === saved.id);
@@ -644,7 +737,7 @@ export function BusinessInventory() {
         {/* Stats */}
         <div className="inv-stats">
           {[
-            { icon: Package, label: 'Total Products', value: (total ?? 0).toString(), color: '#8B1538' },
+            { icon: Package, label: 'Total Products', value: (stats?.total_products ?? total ?? 0).toString(), color: '#8B1538' },
             { icon: AlertTriangle, label: 'Low Stock', value: lowStockCount.toString(), color: '#D97706' },
             { icon: Package, label: 'Out of Stock', value: outOfStockCount.toString(), color: '#DC2626' },
             {

@@ -1,10 +1,14 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Store, MapPin, Star, Package, Eye, Check, Camera,
-  Loader2, Plus, Trash2, ChevronDown, ChevronUp,
+  Loader2, Plus, Trash2, ChevronDown, ChevronUp, AlertCircle,
   ShoppingBag, BarChart2, ArrowLeft, ArrowRight, Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import {
+  createStore, createStoreLocation, updateStore, fetchCategories, uploadImage, getMyStores,
+  type ApiStore, type ApiStoreLocation, type StoreLocationBody, type UploadContext,
+} from '../../services/api';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -397,11 +401,11 @@ function WizardLocCard({ loc, index, total, onUpdate, onDelete }: WizardLocCardP
             <input className={inputCls} value={loc.branchManager} onChange={set('branchManager')} placeholder="Manager's name" />
           </Field>
         </div>
-        <Field label="Street Address">
+        <Field label="Street Address" required>
           <input className={inputCls} value={loc.streetAddress} onChange={set('streetAddress')} placeholder="Street address" />
         </Field>
         <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
-          <Field label="City">
+          <Field label="City" required>
             <input className={inputCls} value={loc.city} onChange={set('city')} placeholder="City" />
           </Field>
           <Field label="State / Region">
@@ -409,7 +413,7 @@ function WizardLocCard({ loc, index, total, onUpdate, onDelete }: WizardLocCardP
           </Field>
         </div>
         <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
-          <Field label="Phone">
+          <Field label="Phone" required>
             <input className={inputCls} value={loc.phone} onChange={set('phone')} placeholder="+234 800 000 0000" />
           </Field>
           <Field label="Email">
@@ -424,19 +428,97 @@ function WizardLocCard({ loc, index, total, onUpdate, onDelete }: WizardLocCardP
   );
 }
 
+// ─── Image Upload Field ───────────────────────────────────────────────────────
+
+const ACCEPTED = 'image/jpeg,image/png,image/webp,image/gif';
+const MAX_BYTES = 5 * 1024 * 1024;
+
+interface ImageUploadFieldProps {
+  label: string;
+  context: UploadContext;
+  value: string;
+  onChange: (url: string) => void;
+  aspect?: 'square' | 'wide';
+}
+
+function ImageUploadField({ label, context, value, onChange, aspect = 'square' }: ImageUploadFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_BYTES) { setError('File exceeds 5 MB'); return; }
+    setError('');
+    setUploading(true);
+    try {
+      const res = await uploadImage(file, context);
+      onChange(res.url);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{label}</label>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className={`relative flex items-center justify-center border-2 border-dashed border-gray-200 rounded-xl overflow-hidden hover:border-[#8B1538] transition-colors group disabled:opacity-60 ${aspect === 'wide' ? 'h-20' : 'h-20 w-20'}`}
+      >
+        {value ? (
+          <img src={value} alt={label} className="w-full h-full object-cover" />
+        ) : uploading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-[#8B1538]" />
+        ) : (
+          <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-[#8B1538] transition-colors px-2">
+            <Camera className="h-5 w-5" />
+            <span className="text-[10px] font-medium text-center leading-tight">Upload</span>
+          </div>
+        )}
+        {value && !uploading && (
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <Camera className="h-5 w-5 text-white" />
+          </div>
+        )}
+      </button>
+      {error && <p className="text-[10px] text-red-500">{error}</p>}
+      <input ref={inputRef} type="file" accept={ACCEPTED} className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
 // ─── Create Store Modal ───────────────────────────────────────────────────────
 
 interface CreateStoreModalProps {
   onClose: () => void;
-  onCreated: (form: StoreForm) => void;
+  onCreated: (store: ApiStore) => void;
 }
 
 function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   const [step, setStep] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(CATEGORIES);
   const [wizard, setWizard] = useState({
-    store_name: '', category: '', tagline: '', description: '',
+    store_name: '', category_slug: '', tagline: '', description: '',
+
+    whatsapp_number: '', return_policy: '', shipping_policy: '',
+    logo_url: '', banner_url: '',
     locations: [makeLocation(true)],
   });
+
+  useEffect(() => {
+    fetchCategories({ limit: 50 }).then(res => {
+      if (res.data.length) setCategoryOptions(res.data.map(c => c.name));
+    }).catch(() => {});
+  }, []);
 
   const setW = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setWizard(prev => ({ ...prev, [key]: e.target.value }));
@@ -458,19 +540,71 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   const addWizLoc = () =>
     setWizard(prev => ({ ...prev, locations: [...prev.locations, makeLocation(false)] }));
 
-  const handleCreate = () => {
-    onCreated({
-      store_name: wizard.store_name || 'My Store',
-      category: wizard.category,
-      tagline: wizard.tagline,
-      description: wizard.description,
-      website: '', whatsapp: '', logo: '', cover_image: '',
-      return_policy: '', shipping_policy: '',
-      locations: wizard.locations.map(l => ({ ...l })),
-    });
-  };
+  const primaryLoc = wizard.locations.find(l => l.isPrimary) ?? wizard.locations[0];
+  const extraLocs = wizard.locations.filter(l => l !== primaryLoc);
 
-  const canNext = wizard.store_name.trim().length > 0;
+  const canNext =
+    wizard.store_name.trim().length > 0;
+
+  const canCreate =
+    primaryLoc?.branchName.trim() &&
+    primaryLoc?.streetAddress.trim() &&
+    primaryLoc?.city.trim() &&
+    primaryLoc?.phone.trim();
+
+  const handleCreate = async () => {
+    if (!canCreate) return;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const primaryLocBody: StoreLocationBody = {
+        branch_name: primaryLoc.branchName,
+        street: primaryLoc.streetAddress,
+        city: primaryLoc.city,
+        phone: primaryLoc.phone,
+        state: primaryLoc.state || undefined,
+        branch_manager: primaryLoc.branchManager || undefined,
+        email: primaryLoc.email || undefined,
+        opening_hours: primaryLoc.openingHours || undefined,
+      };
+
+      const store = await createStore({
+        store_name: wizard.store_name,
+        location: primaryLocBody,
+        delivery_fee: 0,
+        store_tagline: wizard.tagline || undefined,
+        category_slug: wizard.category_slug || undefined,
+        description: wizard.description || undefined,
+        whatsapp_number: wizard.whatsapp_number || undefined,
+        return_policy: wizard.return_policy || undefined,
+        shipping_policy: wizard.shipping_policy || undefined,
+        logo_url: wizard.logo_url || undefined,
+        banner_url: wizard.banner_url || undefined,
+      });
+
+      // Add additional locations sequentially
+      for (const loc of extraLocs) {
+        if (!loc.branchName || !loc.streetAddress || !loc.city || !loc.phone) continue;
+        await createStoreLocation(store.id, {
+          branch_name: loc.branchName,
+          street: loc.streetAddress,
+          city: loc.city,
+          phone: loc.phone,
+          state: loc.state || undefined,
+          branch_manager: loc.branchManager || undefined,
+          email: loc.email || undefined,
+          opening_hours: loc.openingHours || undefined,
+          is_primary: false,
+        });
+      }
+
+      onCreated(store);
+    } catch (e: unknown) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to create store. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div
@@ -515,23 +649,53 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
         <div className="px-4 sm:px-6 py-4 sm:py-5 overflow-y-auto flex-1 overscroll-contain">
           {step === 1 ? (
             <div className="space-y-3 sm:space-y-4">
-              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4">
-                <Field label="Store Name" required>
-                  <input className={inputCls} value={wizard.store_name} onChange={setW('store_name')} placeholder="e.g. TechHub Lagos" />
-                </Field>
-                <Field label="Category" required>
-                  <select className={`${inputCls} bg-white`} value={wizard.category} onChange={setW('category')}>
-                    <option value="">Select category…</option>
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </Field>
-              </div>
+              {/* Required fields */}
+              <Field label="Store Name" required>
+                <input className={inputCls} value={wizard.store_name} onChange={setW('store_name')} placeholder="e.g. TechHub Lagos" />
+              </Field>
+
+              {/* Optional fields */}
+              <Field label="Category">
+                <select className={`${inputCls} bg-white`} value={wizard.category_slug} onChange={setW('category_slug')}>
+                  <option value="">Select category…</option>
+                  {categoryOptions.map(c => <option key={c} value={c.toLowerCase().replace(/\s+/g, '-')}>{c}</option>)}
+                </select>
+              </Field>
               <Field label="Tagline">
                 <input className={inputCls} value={wizard.tagline} onChange={setW('tagline')} placeholder="A short catchy line about your store" />
               </Field>
               <Field label="Description">
-                <textarea className={`${inputCls} resize-none`} rows={4} value={wizard.description} onChange={setW('description')} placeholder="Tell buyers about your store…" />
+                <textarea className={`${inputCls} resize-none`} rows={3} value={wizard.description} onChange={setW('description')} placeholder="Tell buyers about your store…" />
               </Field>
+              <Field label="WhatsApp Number">
+                <input className={inputCls} value={wizard.whatsapp_number} onChange={setW('whatsapp_number')} placeholder="+234 800 000 0000" />
+              </Field>
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
+                <Field label="Return Policy">
+                  <textarea className={`${inputCls} resize-none`} rows={2} value={wizard.return_policy} onChange={setW('return_policy')} placeholder="e.g. 7-day returns accepted" />
+                </Field>
+                <Field label="Shipping Policy">
+                  <textarea className={`${inputCls} resize-none`} rows={2} value={wizard.shipping_policy} onChange={setW('shipping_policy')} placeholder="e.g. Ships within 24 hours" />
+                </Field>
+              </div>
+              <div className="flex gap-4">
+                <ImageUploadField
+                  label="Store Logo"
+                  context="store-logo"
+                  value={wizard.logo_url}
+                  onChange={url => setWizard(prev => ({ ...prev, logo_url: url }))}
+                  aspect="square"
+                />
+                <div className="flex-1">
+                  <ImageUploadField
+                    label="Store Banner"
+                    context="store-banner"
+                    value={wizard.banner_url}
+                    onChange={url => setWizard(prev => ({ ...prev, banner_url: url }))}
+                    aspect="wide"
+                  />
+                </div>
+              </div>
             </div>
           ) : (
             <div>
@@ -556,33 +720,43 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
-          {step === 1 ? (
-            <>
-              <button onClick={onClose} className="text-sm font-semibold text-gray-500 hover:text-gray-700 py-1">Cancel</button>
-              <button
-                onClick={() => setStep(2)}
-                disabled={!canNext}
-                className="flex items-center gap-2 text-white font-bold text-sm rounded-full px-4 sm:px-5 py-2 sm:py-2.5 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-                style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
-              >
-                Next: Locations <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={() => setStep(1)} className="flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-700 py-1">
-                <ArrowLeft className="h-3.5 w-3.5" /> Back
-              </button>
-              <button
-                onClick={handleCreate}
-                className="flex items-center gap-2 text-white font-bold text-sm rounded-full px-4 sm:px-5 py-2 sm:py-2.5 hover:opacity-90 transition-opacity"
-                style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
-              >
-                <Sparkles className="h-3.5 w-3.5" /> Create Store
-              </button>
-            </>
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex-shrink-0">
+          {submitError && (
+            <div className="flex items-center gap-2 text-red-600 text-xs mb-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {submitError}
+            </div>
           )}
+          <div className="flex items-center justify-between">
+            {step === 1 ? (
+              <>
+                <button onClick={onClose} className="text-sm font-semibold text-gray-500 hover:text-gray-700 py-1">Cancel</button>
+                <button
+                  onClick={() => setStep(2)}
+                  disabled={!canNext}
+                  className="flex items-center gap-2 text-white font-bold text-sm rounded-full px-4 sm:px-5 py-2 sm:py-2.5 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+                  style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
+                >
+                  Next: Locations <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setStep(1)} disabled={submitting} className="flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-700 py-1 disabled:opacity-50">
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back
+                </button>
+                <button
+                  onClick={handleCreate}
+                  disabled={submitting || !canCreate}
+                  className="flex items-center gap-2 text-white font-bold text-sm rounded-full px-4 sm:px-5 py-2 sm:py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
+                >
+                  {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {submitting ? 'Creating…' : 'Create Store'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -591,18 +765,75 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+function apiLocationToLocal(l: ApiStoreLocation): Location {
+  return {
+    id: l.id,
+    isPrimary: l.is_primary,
+    branchName: l.branch_name,
+    branchManager: l.branch_manager ?? '',
+    streetAddress: l.street,
+    city: l.city,
+    state: l.state ?? '',
+    phone: l.phone,
+    email: l.email ?? '',
+    openingHours: l.opening_hours ?? '',
+  };
+}
+
+function storeToForm(store: ApiStore): StoreForm {
+  const locations = (store.locations ?? []).map(apiLocationToLocal);
+  if (locations.length > 0 && !locations.some(l => l.isPrimary)) locations[0].isPrimary = true;
+  return {
+    store_name: store.store_name,
+    category: store.category
+      ? typeof store.category === 'string' ? store.category : (store.category as { name: string }).name
+      : '',
+    tagline: store.store_tagline ?? '',
+    description: store.description ?? '',
+    website: '',
+    whatsapp: store.whatsapp_number ?? '',
+    logo: store.logo_url ?? '',
+    cover_image: store.banner_url ?? '',
+    return_policy: store.return_policy ?? '',
+    shipping_policy: store.shipping_policy ?? '',
+    locations,
+  };
+}
+
 export function BusinessStorefront() {
-  const [view, setView] = useState<'empty' | 'form'>('empty');
+  const [view, setView] = useState<'loading' | 'empty' | 'form'>('loading');
   const [showModal, setShowModal] = useState(false);
+  const [storeId, setStoreId] = useState<string | null>(null);
   const [form, setForm] = useState<StoreForm | null>(null);
   const [originalForm, setOriginalForm] = useState<StoreForm | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 
-  const handleStoreCreated = useCallback((newForm: StoreForm) => {
-    setForm(newForm);
-    setOriginalForm(JSON.parse(JSON.stringify(newForm)));
+  // Load existing store on mount
+  useEffect(() => {
+    getMyStores()
+      .then(stores => {
+        const list = Array.isArray(stores) ? stores : (stores as { data?: ApiStore[] }).data ?? [];
+        if (list.length > 0) {
+          const store = list[0];
+          const f = storeToForm(store);
+          setStoreId(store.id);
+          setForm(f);
+          setOriginalForm(JSON.parse(JSON.stringify(f)));
+          setView('form');
+        } else {
+          setView('empty');
+        }
+      })
+      .catch(() => setView('empty'));
+  }, []);
+
+  const handleStoreCreated = useCallback((store: ApiStore) => {
+    const f = storeToForm(store);
+    setStoreId(store.id);
+    setForm(f);
+    setOriginalForm(JSON.parse(JSON.stringify(f)));
     setIsDirty(false);
     setView('form');
     setShowModal(false);
@@ -655,16 +886,30 @@ export function BusinessStorefront() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!storeId || !form) return;
     setSaving(true);
-    // Replace setTimeout with your real API call (createStore / updateStore)
-    setTimeout(() => {
+    setSaveState('idle');
+    try {
+      await updateStore(storeId, {
+        store_name: form.store_name,
+        store_tagline: form.tagline || undefined,
+        description: form.description || undefined,
+        whatsapp_number: form.whatsapp || undefined,
+        return_policy: form.return_policy || undefined,
+        shipping_policy: form.shipping_policy || undefined,
+        logo_url: form.logo || undefined,
+        banner_url: form.cover_image || undefined,
+      });
       setOriginalForm(JSON.parse(JSON.stringify(form)));
       setIsDirty(false);
-      setSaving(false);
       setSaveState('saved');
       setTimeout(() => setSaveState('idle'), 2500);
-    }, 900);
+    } catch {
+      setSaveState('error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDiscard = () => {
@@ -686,7 +931,11 @@ export function BusinessStorefront() {
         </p>
         <h1 className="text-xl sm:text-2xl font-extrabold text-gray-900 mb-4 sm:mb-5">Storefront</h1>
 
-        {view === 'empty' ? (
+        {view === 'loading' ? (
+          <div className="flex items-center justify-center py-20 text-gray-400">
+            <Loader2 className="h-6 w-6 animate-spin text-[#8B1538]" />
+          </div>
+        ) : view === 'empty' ? (
           <EmptyState onCreate={() => setShowModal(true)} />
         ) : form && (
           <div className="space-y-3 sm:space-y-4 lg:space-y-5">
@@ -794,13 +1043,23 @@ export function BusinessStorefront() {
 
             {/* Store Media */}
             <SectionCard icon={Camera} title="Store Media">
-              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4">
-                <Field label="Logo URL">
-                  <input className={inputCls} type="url" value={form.logo} onChange={setField('logo')} placeholder="https://…" />
-                </Field>
-                <Field label="Cover Image URL">
-                  <input className={inputCls} type="url" value={form.cover_image} onChange={setField('cover_image')} placeholder="https://…" />
-                </Field>
+              <div className="flex gap-4">
+                <ImageUploadField
+                  label="Store Logo"
+                  context="store-logo"
+                  value={form.logo}
+                  onChange={url => { setForm(prev => prev ? { ...prev, logo: url } : prev); setIsDirty(true); }}
+                  aspect="square"
+                />
+                <div className="flex-1">
+                  <ImageUploadField
+                    label="Store Banner"
+                    context="store-banner"
+                    value={form.cover_image}
+                    onChange={url => { setForm(prev => prev ? { ...prev, cover_image: url } : prev); setIsDirty(true); }}
+                    aspect="wide"
+                  />
+                </div>
               </div>
               {(form.logo || form.cover_image) && (
                 <div className="flex flex-wrap gap-3 mt-3">

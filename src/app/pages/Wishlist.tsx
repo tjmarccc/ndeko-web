@@ -2,15 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Heart, ShoppingCart, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
+import { useWishlist } from '../contexts/WishlistContext';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import {
   getWishlist,
-  removeFromWishlist as apiRemoveFromWishlist,
-  // addToCart as apiAddToCart,
   mapApiProduct,
-  type ApiProduct,
+  type WishlistItem,
 } from '../services/api';
 import type { Product } from '../types/product';
 
@@ -37,6 +36,7 @@ function SkeletonCard() {
 
 export function Wishlist() {
   const { addToCart } = useCart();
+  const { removeFromWishlist: contextRemove } = useWishlist();
 
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +51,7 @@ export function Wishlist() {
     setError(null);
     try {
       const res = await getWishlist();
-      setItems(res.data.map((p: ApiProduct) => mapApiProduct(p)));
+      setItems(res.data.map((item: WishlistItem) => mapApiProduct(item.product)));
     } catch {
       setError('Failed to load your wishlist. Please try again.');
     } finally {
@@ -65,7 +65,7 @@ export function Wishlist() {
   const handleRemove = async (productId: string) => {
     setRemoving((prev) => new Set(prev).add(productId));
     try {
-      await apiRemoveFromWishlist(productId);
+      await contextRemove(productId);
       setItems((prev) => prev.filter((p) => p.id !== productId));
     } catch {
       // Silently revert — item stays in list

@@ -6,6 +6,7 @@ import {
   Search, Home, Users, ShoppingCart, Heart,
 } from 'lucide-react';
 import { NdekoLogo } from './NdekoLogo';
+import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
   { label: 'Dashboard', path: '/business', icon: LayoutDashboard },
@@ -24,9 +25,23 @@ const bottomNavItems = [
 export function BusinessLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const displayName = user
+    ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email
+    : '—';
+  const initials = user
+    ? `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase() || '?'
+    : '?';
+
+  const handleSignOut = async () => {
+    setProfileOpen(false);
+    await logout();
+    navigate('/login');
+  };
 
   const activePath = location.pathname;
 
@@ -54,7 +69,7 @@ export function BusinessLayout() {
       <header className="sticky top-0 z-40 bg-white border-b shadow-sm" style={{ borderColor: 'rgba(139,21,56,0.12)' }}>
         {/* Top accent bar */}
         <div className="bg-[#8B1538] text-white py-1.5 px-4 flex items-center justify-between">
-          <p className="text-xs">🏪 Business Portal — TechHub Lagos &nbsp;·&nbsp; Active Store</p>
+          <p className="text-xs">🏪 Business Portal — {displayName} &nbsp;·&nbsp; Active Store</p>
           <div className="flex items-center gap-4 text-xs">
             <Link to="/" className="hover:underline flex items-center gap-1 text-white/80 hover:text-white transition-colors">
               <Home className="h-3 w-3" /> Buyer Store
@@ -144,9 +159,9 @@ export function BusinessLayout() {
                   className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
                   style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
                 >
-                  TH
+                  {initials}
                 </div>
-                <span className="hidden md:block text-sm font-semibold text-gray-700">TechHub Lagos</span>
+                <span className="hidden md:block text-sm font-semibold text-gray-700">{displayName}</span>
                 <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
               </button>
 
@@ -156,8 +171,8 @@ export function BusinessLayout() {
                   style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
                 >
                   <div className="px-4 py-2.5 border-b border-gray-100">
-                    <p className="text-sm font-bold text-gray-800">TechHub Lagos</p>
-                    <p className="text-xs text-gray-400">techhublagos@ndeko.com</p>
+                    <p className="text-sm font-bold text-gray-800">{displayName}</p>
+                    <p className="text-xs text-gray-400">{user?.email ?? ''}</p>
                   </div>
                   <Link
                     to="/business/storefront"
@@ -182,7 +197,7 @@ export function BusinessLayout() {
                   </Link>
                   <hr className="my-1 border-gray-100" />
                   <button
-                    onClick={() => { setProfileOpen(false); navigate('/login'); }}
+                    onClick={handleSignOut}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors"
                   >
                     <LogOut className="h-4 w-4" /> Sign Out
@@ -275,10 +290,10 @@ export function BusinessLayout() {
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
                 style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
               >
-                TH
+                {initials}
               </div>
               <div>
-                <p className="text-white text-sm font-semibold">TechHub Lagos</p>
+                <p className="text-white text-sm font-semibold">{displayName}</p>
                 <div className="flex items-center gap-1">
                   <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
                   <p className="text-green-400/80 text-xs">Active Store</p>
@@ -341,7 +356,7 @@ export function BusinessLayout() {
               Buyer Store
             </Link>
             <button
-              onClick={() => navigate('/login')}
+              onClick={handleSignOut}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all hover:bg-white/5"
               style={{ color: 'rgba(255,255,255,0.4)' }}
             >

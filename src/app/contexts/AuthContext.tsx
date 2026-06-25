@@ -88,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleAuthResponse = useCallback(
     (data: AuthResponse) => {
+      tokenStore.clear(); // wipe any stale tokens from a previous account before saving new ones
       tokenStore.setAccess(data.tokens.access_token);
       tokenStore.setRefresh(data.tokens.refresh_token);
       tokenStore.setUser(data.user);
@@ -151,10 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const refreshToken = tokenStore.getRefresh();
-    if (refreshToken) {
-      await logoutUser(refreshToken).catch(() => {});
-    }
+    await logoutUser().catch(() => {});
     tokenStore.clear();
     setUser(null);
     setToken(null);

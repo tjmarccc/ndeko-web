@@ -114,10 +114,10 @@ export function Header() {
       <div className="border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         <div className="container mx-auto px-4 py-2">
           <div className="flex items-center gap-6 overflow-x-auto">
-            <Button variant="ghost" size="sm" className="whitespace-nowrap">
+            <Link to="/products" className="flex items-center text-sm font-medium hover:text-[#8B1538] whitespace-nowrap">
               <Menu className="h-4 w-4 mr-2" />
               All Categories
-            </Button>
+            </Link>
             <Link to="/products?category=electronics" className="text-sm hover:text-[#8B1538] dark:text-gray-300 dark:hover:text-[#D4828F] whitespace-nowrap">Electronics</Link>
             <Link to="/products?category=fashion" className="text-sm hover:text-[#8B1538] dark:text-gray-300 dark:hover:text-[#D4828F] whitespace-nowrap">Fashion</Link>
             <Link to="/products?category=home" className="text-sm hover:text-[#8B1538] dark:text-gray-300 dark:hover:text-[#D4828F] whitespace-nowrap">Home & Kitchen</Link>
