@@ -13,16 +13,8 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  'Electronics & Technology',
-  'Food & Beverages',
-  'Health & Beauty',
-  'Home & Living',
-  'Industrial & Manufacturing',
-  'Automotive',
-  'Agriculture',
-  'Office Supplies',
-  'Digital Products & Services',
-  'Other',
+  'Electronics', 'Fashion', 'Food & Beverages', 'Health & Beauty',
+  'Home & Garden', 'Sports', 'Books', 'Automotive', 'Services', 'Other',
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -42,7 +34,7 @@ interface Location {
 
 interface StoreForm {
   store_name: string;
-  category: string;
+  categories: string[];
   tagline: string;
   description: string;
   website: string;
@@ -76,7 +68,48 @@ function getInitials(name: string): string {
 const inputCls =
   'w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-800 outline-none focus:border-[#8B1538] focus:ring-2 focus:ring-[#8B1538]/10 transition-all placeholder:text-gray-400';
 
-// ─── Field ────────────────────────────────────────────────────────────────────
+// ─── Category Picker ──────────────────────────────────────────────────────────
+
+interface CategoryPickerProps {
+  selected: string[];
+  options: string[];
+  onChange: (selected: string[]) => void;
+}
+
+function CategoryPicker({ selected, options, onChange }: CategoryPickerProps) {
+  const toggle = (cat: string) => {
+    if (selected.includes(cat)) {
+      onChange(selected.filter(c => c !== cat));
+    } else {
+      onChange([...selected, cat]);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(cat => {
+        const active = selected.includes(cat);
+        return (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => toggle(cat)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+              active
+                ? 'bg-[#8B1538] text-white border-[#8B1538]'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-[#8B1538] hover:text-[#8B1538]'
+            }`}
+          >
+            {active && <Check className="inline h-3 w-3 mr-1 -mt-0.5" />}
+            {cat}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+
 
 interface FieldProps {
   label: string;
@@ -515,7 +548,7 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   const [submitError, setSubmitError] = useState('');
   const [categoryOptions, setCategoryOptions] = useState<string[]>(CATEGORIES);
   const [wizard, setWizard] = useState({
-    store_name: '', category_slug: '', tagline: '', description: '',
+    store_name: '', category_slugs: [] as string[], tagline: '', description: '',
     whatsapp_number: '', return_policy: '', shipping_policy: '',
     logo_url: '', banner_url: '',
     locations: [makeLocation(true)],
@@ -579,7 +612,7 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
         location: primaryLocBody,
         delivery_fee: 0,
         store_tagline: wizard.tagline || undefined,
-        category_slug: wizard.category_slug || undefined,
+        category_slug: wizard.category_slugs[0] ?? undefined,
         description: wizard.description || undefined,
         whatsapp_number: wizard.whatsapp_number || undefined,
         return_policy: wizard.return_policy || undefined,
@@ -657,11 +690,12 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
               <Field label="Store Name" required>
                 <input className={inputCls} value={wizard.store_name} onChange={setW('store_name')} placeholder="e.g. TechHub Lagos" />
               </Field>
-              <Field label="Category">
-                <select className={`${inputCls} bg-white`} value={wizard.category_slug} onChange={setW('category_slug')}>
-                  <option value="">Select category…</option>
-                  {categoryOptions.map(c => <option key={c} value={c.toLowerCase().replace(/\s+/g, '-')}>{c}</option>)}
-                </select>
+              <Field label="Categories" hint="Select all that apply">
+                <CategoryPicker
+                  selected={wizard.category_slugs}
+                  options={categoryOptions}
+                  onChange={slugs => setWizard(prev => ({ ...prev, category_slugs: slugs }))}
+                />
               </Field>
               <Field label="Tagline">
                 <input className={inputCls} value={wizard.tagline} onChange={setW('tagline')} placeholder="A short catchy line about your store" />
@@ -785,11 +819,12 @@ function apiLocationToLocal(l: ApiStoreLocation): Location {
 function storeToForm(store: ApiStore): StoreForm {
   const locations = (store.locations ?? []).map(apiLocationToLocal);
   if (locations.length > 0 && !locations.some(l => l.isPrimary)) locations[0].isPrimary = true;
+  const rawCategory = store.category
+    ? typeof store.category === 'string' ? store.category : (store.category as { name: string }).name
+    : '';
   return {
     store_name: store.store_name,
-    category: store.category
-      ? typeof store.category === 'string' ? store.category : (store.category as { name: string }).name
-      : '',
+    categories: rawCategory ? [rawCategory] : [],
     tagline: store.store_tagline ?? '',
     description: store.description ?? '',
     website: '',
@@ -1009,13 +1044,21 @@ export function BusinessStorefront() {
                   <Field label="Store Name" required>
                     <input className={inputCls} value={form.store_name} onChange={setField('store_name')} placeholder="Your store name" />
                   </Field>
-                  <Field label="Category" required>
-                    <select className={`${inputCls} bg-white`} value={form.category} onChange={setField('category')}>
-                      <option value="">Select category…</option>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </Field>
                 </div>
+                <Field label="Categories" required hint="Select all that apply">
+                  <CategoryPicker
+                    selected={form.categories}
+                    options={CATEGORIES}
+                    onChange={cats => {
+                      setForm(prev => {
+                        if (!prev) return prev;
+                        const next = { ...prev, categories: cats };
+                        setIsDirty(JSON.stringify(next) !== JSON.stringify(originalForm));
+                        return next;
+                      });
+                    }}
+                  />
+                </Field>
                 <Field label="Tagline">
                   <input className={inputCls} value={form.tagline} onChange={setField('tagline')} placeholder="A short description of your store" />
                 </Field>
