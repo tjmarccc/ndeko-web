@@ -143,7 +143,7 @@ export function ProductDetail() {
       setReviewSummary(summaryRes);
 
       if (raw.category?.slug) {
-        const rel = await fetchProducts({ category_slug: raw.category.slug, limit: 5 });
+        const rel = await fetchProducts({ category: raw.category.slug, limit: 5 });
         setRelated(
           rel.data
             .filter((p) => p.id !== id)

@@ -260,6 +260,52 @@ export interface ReviewSummary {
   breakdown?: Record<string, number>;
 }
 
+// ── Account Preferences / Payments / Wallet Types ─────────────────────────────
+export interface AddressBody {
+  label: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  street: string;
+  city: string;
+  state: string;
+  country?: string;
+}
+
+export interface NotificationPreferences {
+  order_updates: boolean;
+  promotions: boolean;
+  news_and_tips: boolean;
+  account_activity: boolean;
+}
+
+export interface SavedPaymentMethod {
+  id: string;
+  type: 'card' | 'bank_transfer';
+  last_four: string;
+  brand?: string;
+  exp_month?: number;
+  exp_year?: number;
+  account_number?: string;
+  bank_name?: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface WalletData {
+  balance: number;
+  currency: string;
+  total_earned: number;
+  total_withdrawn: number;
+  pending_withdrawal?: number;
+}
+
+export interface BankDetails {
+  account_name: string;
+  account_number: string;
+  bank_name: string;
+  bank_code: string;
+}
+
 export type Product = ApiProduct;
 
 // ── Axios Instance ───────────────────────────────────────────────────────────
@@ -493,6 +539,119 @@ export const deleteAccount = async (): Promise<any> => {
   try {
     const response = await apiClient.delete('/api/v1/users/me');
     tokenStore.clear();
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Account Preferences Endpoints ────────────────────────────────────────────
+export const updateMe = async (data: Partial<AuthUser>): Promise<AuthUser> => {
+  return updateProfile(data);
+};
+
+export const getNotificationPreferences = async (): Promise<NotificationPreferences> => {
+  try {
+    const response = await apiClient.get<{ data: NotificationPreferences }>(
+      '/api/v1/users/me/preferences/notifications'
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateNotificationPreferences = async (
+  data: Partial<NotificationPreferences>
+): Promise<NotificationPreferences> => {
+  try {
+    const response = await apiClient.put<{ data: NotificationPreferences }>(
+      '/api/v1/users/me/preferences/notifications',
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Payment Methods Endpoints ────────────────────────────────────────────────
+export const getSavedPaymentMethods = async (): Promise<SavedPaymentMethod[]> => {
+  try {
+    const response = await apiClient.get<{ data: SavedPaymentMethod[] }>(
+      '/api/v1/users/me/payment-methods'
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const deleteSavedPaymentMethod = async (methodId: string): Promise<any> => {
+  try {
+    const response = await apiClient.delete(`/api/v1/users/me/payment-methods/${methodId}`);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const setDefaultPaymentMethod = async (methodId: string): Promise<SavedPaymentMethod> => {
+  try {
+    const response = await apiClient.patch<{ data: SavedPaymentMethod }>(
+      `/api/v1/users/me/payment-methods/${methodId}/default`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const initiateAddPaymentMethod = async (
+  type: 'card' | 'bank_transfer',
+  data?: any
+): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/users/me/payment-methods/initiate', {
+      type,
+      ...data,
+    });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Wallet & Payout Endpoints ────────────────────────────────────────────────
+export const getWallet = async (): Promise<WalletData> => {
+  try {
+    const response = await apiClient.get<{ data: WalletData }>(
+      '/api/v1/users/me/wallet'
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const saveBankDetails = async (data: BankDetails): Promise<BankDetails> => {
+  try {
+    const response = await apiClient.post<{ data: BankDetails }>(
+      '/api/v1/users/me/bank-details',
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const withdraw = async (amount: number, bank_detail_id?: string): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/users/me/withdraw', {
+      amount,
+      ...(bank_detail_id ? { bank_detail_id } : {}),
+    });
     return response.data;
   } catch (error) {
     handleError(error);
