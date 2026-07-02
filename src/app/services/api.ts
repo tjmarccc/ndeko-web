@@ -1,41 +1,59 @@
-import type { Product } from '../types/product';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://ndeko-backend-dev.onrender.com';
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
-let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
+export type UploadContext = 'product' | 'store-logo' | 'store-banner' | 'profile-avatar';
+
+// ── Session Expiry Event ──────────────────────────────────────────────────────
+export const SESSION_EXPIRED_EVENT = 'session_expired';
+
+// ── User Role Enum ────────────────────────────────────────────────────────────
+export enum UserRole {
+  BUYER = 'buyer',
+  SELLER = 'seller',
+  ADMIN = 'admin',
+}
+
+// ── Token Management ──────────────────────────────────────────────────────────
+let _accessToken: string | null = localStorage.getItem('ndeko_token');
+let _refreshToken: string | null = localStorage.getItem('ndeko_refresh_token');
+let _user: AuthUser | null = null;
+
+try {
+  const stored = localStorage.getItem('ndeko_user');
+  _user = stored ? JSON.parse(stored) : null;
+} catch {
+  _user = null;
+}
 
 export const tokenStore = {
   getAccess: () => _accessToken,
-  setAccess: (t: string) => { _accessToken = t; localStorage.setItem('ndeko_access_token', t); },
-
-  getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
-  setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
-
-  getUser: (): AuthUser | null => {
-    try {
-      const raw = localStorage.getItem('ndeko_user');
-      return raw ? (JSON.parse(raw) as AuthUser) : null;
-    } catch {
-      return null;
-    }
+  setAccess: (t: string) => {
+    _accessToken = t;
+    localStorage.setItem('ndeko_token', t);
   },
-  setUser: (u: AuthUser) => localStorage.setItem('ndeko_user', JSON.stringify(u)),
-
+  getRefresh: () => _refreshToken,
+  setRefresh: (t: string) => {
+    _refreshToken = t;
+    localStorage.setItem('ndeko_refresh_token', t);
+  },
+  getUser: () => _user,
+  setUser: (u: AuthUser) => {
+    _user = u;
+    localStorage.setItem('ndeko_user', JSON.stringify(u));
+  },
   clear: () => {
     _accessToken = null;
-    localStorage.removeItem('ndeko_access_token');
+    _refreshToken = null;
+    _user = null;
+    localStorage.removeItem('ndeko_token');
     localStorage.removeItem('ndeko_refresh_token');
     localStorage.removeItem('ndeko_user');
   },
 };
 
-export const SESSION_EXPIRED_EVENT = 'ndeko:session_expired';
-function dispatchSessionExpired() {
-  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-}
-
+// ── API Error Class ──────────────────────────────────────────────────────────
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -48,6 +66,7 @@ export class ApiError extends Error {
   }
 }
 
+// ── Types ────────────────────────────────────────────────────────────────────
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;
@@ -58,13 +77,16 @@ export interface PaginatedResponse<T> {
 export interface AuthTokens {
   access_token: string;
   refresh_token: string;
+  expires_in?: number;
 }
 
-export enum UserRole {
-  BUYER = 'buyer',
-  SELLER = 'seller',
-  DISPATCHER = 'dispatcher',
-  ADMIN = 'admin',
+export interface AuthResponse {
+  success: boolean;
+  message: string;
+  data: {
+    user: AuthUser;
+    tokens: AuthTokens;
+  };
 }
 
 export interface AuthUser {
@@ -72,52 +94,12 @@ export interface AuthUser {
   email: string;
   first_name: string;
   last_name: string;
-  /** Convenience getter — not sent by API, derived on the frontend */
   name?: string;
-  role: string;
-  is_email_verified: boolean;
-  is_identity_verified?: boolean;
-  avatar_url?: string;
-  /** @deprecated use avatar_url */
-  avatar?: string;
   phone?: string;
-}
-
-// ─── Account security / addresses / notifications / payment methods ───────────
-
-export interface NotificationPreferences {
-  order_updates: boolean;
-  deals: boolean;
-  wishlist: boolean;
-  newsletter: boolean;
-  sms: boolean;
-}
-
-export interface SavedPaymentMethod {
-  id: string;
-  card_type: string;
-  last_four: string;
-  cardholder_name: string;
-  expiry: string;
-  is_default: boolean;
-  authorization_code?: string;
-}
-
-export interface AuthResponse {
-  user: AuthUser;
-  tokens: AuthTokens;
-  _dev_verify_link?: string;
-  is_new_user?: boolean;
-}
-
-export interface ApiCategory {
-  id: string;
-  name: string;
-  slug: string;
-  parent_id?: string | null;
-  description?: string;
-  icon_url?: string;
-  created_at?: string;
+  avatar_url?: string;
+  role: 'buyer' | 'seller' | 'admin';
+  is_email_verified: boolean;
+  created_at: string;
 }
 
 export interface ApiProduct {
@@ -132,62 +114,19 @@ export interface ApiProduct {
   images: string[];
   sku: string;
   is_active: boolean;
-  category?: ApiCategory;
-  store?: { id: string; store_name: string; store_slug: string };
+  category?: { id: string; name: string; slug: string };
+  store?: { id: string; store_name: string };
   average_rating?: number;
   review_count?: number;
   created_at: string;
 }
 
-export interface ApiBusiness {
+export interface ApiCategory {
   id: string;
-  business_name: string;
+  name: string;
+  slug: string;
   description?: string;
-  logo?: string;
-  cover_image?: string;
-  status: 'pending' | 'verified' | 'rejected' | 'suspended';
-}
-
-export interface ApiStoreLocation {
-  id: string;
-  store_id: string;
-  branch_name: string;
-  branch_manager?: string | null;
-  street: string;
-  city: string;
-  state?: string | null;
-  phone: string;
-  email?: string | null;
-  opening_hours?: string | null;
-  is_primary: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface ApiStore {
-  id: string;
-  business_id?: string;
-  store_name: string;
-  store_slug: string;
-  store_tagline?: string;
-  /** String name (current API) or full object when the join is populated */
-  category?: string | ApiCategory;
-  description?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  contact_phone?: string;
-  contact_email?: string;
-  whatsapp_number?: string;
-  logo_url?: string;
-  banner_url?: string;
-  delivery_fee?: number | string;
-  return_policy?: string;
-  shipping_policy?: string;
-  status: 'active' | 'inactive' | 'suspended';
-  average_rating?: number;
-  visitor_count?: number;
-  locations?: ApiStoreLocation[];
+  icon?: string;
 }
 
 export interface ApiOrder {
@@ -199,8 +138,7 @@ export interface ApiOrder {
   payment_url?: string;
   total_amount: number;
   created_at: string;
-  buyer?: { first_name: string; last_name: string };
-  items?: { product_name: string; quantity: number; unit_price: number }[];
+  items?: Array<{ product_name: string; quantity: number; unit_price: number }>;
 }
 
 export interface ApiAddress {
@@ -213,22 +151,10 @@ export interface ApiAddress {
   state: string;
   country?: string;
   is_default: boolean;
-  created_at?: string;
 }
 
-export type AddressBody = {
-  label: string;
-  recipient_name?: string;
-  recipient_phone?: string;
-  street: string;
-  city: string;
-  state: string;
-  country?: string;
-  is_default?: boolean;
-};
-
 export interface CheckoutBody {
-  items: { product_id: string; quantity: number }[];
+  items: Array<{ product_id: string; quantity: number }>;
   delivery_address: {
     recipient_name?: string;
     recipient_phone?: string;
@@ -241,420 +167,49 @@ export interface CheckoutBody {
   promo_code?: string;
 }
 
-export interface Wallet {
+export interface RegisterBody {
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  role: UserRole;
+  business_name?: string;
+}
+
+export interface ApiStore {
   id: string;
-  balance: number;
-  available_balance: number;
-  pending_balance: number;
-  withdrawable_balance: number;
-  currency: string;
-}
-
-export interface WalletTransaction {
-  id: string;
-  type: 'credit' | 'debit';
-  amount: number;
-  description: string;
-  created_at: string;
-}
-
-export interface StoreDashboard {
-  revenue: number;
-  orders: Record<string, number>;
-  visitors: number;
-  active_products: number;
-}
-
-export interface StoreSnapshot {
-  snapshot_date: string;
-  revenue: number;
-  orders_count: number;
-  visitors_count: number;
-  active_products_count: number;
-  avg_order_value: number;
-}
-
-export interface ApiReview {
-  id: string;
-  rating: number;
-  comment?: string;
-  is_verified_purchase?: boolean;
-  reviewer: { id: string; first_name: string; last_name: string };
-  created_at: string;
-}
-
-export interface ReviewSummary {
-  total_reviews: number;
-  avg_rating: number | null;
-  verified_count?: number;
-  breakdown: Record<string, number>;
-}
-
-export interface ApiGig {
-  id: string;
-  title: string;
-  description: string;
-  city: string;
-  fee: number;
-  status: 'pending' | 'listed' | 'assigned' | 'in_progress' | 'delivered' | 'cancelled';
-  created_at: string;
-}
-
-export interface KycSubmission {
-  id: string;
-  owner_type: string;
-  owner_id: string;
-  document_type: string;
-  document_url: string;
-  status: 'pending' | 'passed' | 'failed';
-  created_at: string;
-}
-
-export type RegisterBody =
-  | { first_name: string; last_name: string; email: string; password: string; role: UserRole.BUYER | UserRole.SELLER }
-  | { first_name: string; last_name: string; email: string; password: string; role: UserRole.SELLER; business_name: string };
-
-function buildQuery(params?: Record<string, unknown>): string {
-  if (!params) return '';
-  const q = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') {
-      q.append(k, String(v));
-    }
-  });
-  const str = q.toString();
-  return str ? `?${str}` : '';
-}
-
-let _refreshPromise: Promise<AuthTokens> | null = null;
-
-async function doRefresh(): Promise<AuthTokens> {
-  if (_refreshPromise) return _refreshPromise;
-
-  _refreshPromise = (async () => {
-    const refresh = tokenStore.getRefresh();
-    if (!refresh) throw new ApiError('No refresh token', 401);
-    // After envelope unwrap, refresh returns { tokens: { access_token, refresh_token } }
-    const result = await publicFetch<{ tokens: AuthTokens } | AuthTokens>('/api/v1/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: refresh }),
-    });
-    // Handle both nested { tokens } and flat shapes defensively
-    return ('tokens' in result && result.tokens) ? result.tokens : result as AuthTokens;
-  })().finally(() => {
-    _refreshPromise = null;
-  });
-
-  return _refreshPromise;
-}
-
-async function coreFetch(url: string, options: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') {
-      throw new ApiError('Request timed out — please try again.', 0, err);
-    }
-    throw new ApiError(
-      'Network error — unable to reach the server. It may be starting up, please try again.',
-      0,
-      err
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function parseResponse(res: Response): Promise<unknown> {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function buildHeaders(
-  extra: Record<string, string> = {},
-  body?: RequestInit['body'],
-  token?: string | null
-): Record<string, string> {
-  const headers: Record<string, string> = { ...extra };
-  if (!(body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-  }
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  return headers;
-}
-
-async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers = buildHeaders(options.headers as Record<string, string>, options.body);
-  const res = await coreFetch(`${BASE_URL}${path}`, { ...options, headers });
-  const json = await parseResponse(res);
-
-  if (!res.ok) {
-    const msg = (json as Record<string, unknown>)?.message as string ?? `Request failed: ${res.status}`;
-    throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
-  }
-
-  // Unwrap the standard { success, message, data[, meta] } envelope.
-  // For paginated responses the server sends { data: T[], meta: { total, page, limit } }.
-  // We reassemble that into the PaginatedResponse shape the callers expect.
-  const envelope = json as Record<string, unknown>;
-  if (envelope?.data !== undefined) {
-    if (envelope.meta && typeof envelope.meta === 'object') {
-      // Paginated: merge data array + meta fields into one flat object
-      return { data: envelope.data, ...(envelope.meta as object) } as T;
-    }
-    return envelope.data as T;
-  }
-  return json as T;
-}
-
-async function authFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const token = tokenStore.getAccess();
-  const headers = buildHeaders(options.headers as Record<string, string>, options.body, token);
-  const res = await coreFetch(`${BASE_URL}${path}`, { ...options, headers });
-
-  if (res.status === 401 && retry) {
-    try {
-      const tokens = await doRefresh();
-      tokenStore.setAccess(tokens.access_token);
-      if (tokens.refresh_token) tokenStore.setRefresh(tokens.refresh_token);
-      return authFetch<T>(path, options, false);
-    } catch (refreshErr) {
-      if (refreshErr instanceof ApiError && refreshErr.status === 401) {
-        tokenStore.clear();
-        dispatchSessionExpired();
-        throw new ApiError('SESSION_EXPIRED', 401);
-      }
-      throw refreshErr;
-    }
-  }
-
-  const json = await parseResponse(res);
-
-  if (!res.ok) {
-    const msg = (json as Record<string, unknown>)?.message as string ?? `Request failed: ${res.status}`;
-    throw new ApiError(msg, res.status, json, { endpoint: path, timestamp: Date.now() });
-  }
-
-  // Unwrap the standard { success, message, data[, meta] } envelope
-  const envelope = json as Record<string, unknown>;
-  if (envelope?.data !== undefined) {
-    if (envelope.meta && typeof envelope.meta === 'object') {
-      return { data: envelope.data, ...(envelope.meta as object) } as T;
-    }
-    return envelope.data as T;
-  }
-  return json as T;
-}
-
-// ─── Auth ─────────────────────────────────────────────────────────────────────
-
-export const registerUser = (body: RegisterBody) =>
-  publicFetch<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(body) });
-
-export const loginUser = (body: { email: string; password: string }) =>
-  publicFetch<AuthResponse>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(body) });
-
-export const googleAuth = (body: { id_token: string; role?: string }) =>
-  publicFetch<AuthResponse>('/api/v1/auth/google', { method: 'POST', body: JSON.stringify(body) });
-
-export const refreshToken = (body: { refresh_token: string }) =>
-  publicFetch<AuthTokens>('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify(body) });
-
-export const logoutUser = () =>
-  authFetch<void>('/api/v1/auth/logout', { method: 'POST' });
-
-export const verifyEmail = (token: string) =>
-  publicFetch<void>(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`, {
-    method: 'POST', body: JSON.stringify({ token }),
-  });
-
-export const forgotPassword = (email: string) =>
-  publicFetch<void>('/api/v1/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
-
-export const resetPassword = (body: { email: string; otp: string; password: string }) =>
-  publicFetch<void>('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify(body) });
-
-// ─── Users ────────────────────────────────────────────────────────────────────
-
-export const getMe = () => authFetch<AuthUser>('/api/v1/users/me');
-
-export const updateMe = (body: { name?: string; phone?: string; avatar?: string }) =>
-  authFetch<AuthUser>('/api/v1/users/me', { method: 'PUT', body: JSON.stringify(body) });
-
-// ─── Addresses ────────────────────────────────────────────────────────────────
-
-export const getMyAddresses = () =>
-  authFetch<ApiAddress[]>('/api/v1/users/me/addresses');
-
-export const createAddress = (body: AddressBody) =>
-  authFetch<ApiAddress>('/api/v1/users/me/addresses', { method: 'POST', body: JSON.stringify(body) });
-
-export const updateAddress = (addressId: string, body: Partial<AddressBody>) =>
-  authFetch<ApiAddress>(`/api/v1/users/me/addresses/${addressId}`, { method: 'PUT', body: JSON.stringify(body) });
-
-export const deleteAddress = (addressId: string) =>
-  authFetch<void>(`/api/v1/users/me/addresses/${addressId}`, { method: 'DELETE' });
-
-export const setDefaultAddress = (addressId: string) =>
-  authFetch<ApiAddress>(`/api/v1/users/me/addresses/${addressId}/default`, { method: 'PATCH' });
-
-export const changePassword = (body: { current_password: string; new_password: string }) =>
-  authFetch<{ message: string }>('/api/v1/auth/change-password', {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  });
-
-export const deleteAccount = () =>
-  authFetch<{ message: string }>('/api/v1/users/me', { method: 'DELETE' });
-
-export const getNotificationPreferences = () =>
-  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences');
-
-export const updateNotificationPreferences = (body: Partial<NotificationPreferences>) =>
-  authFetch<NotificationPreferences>('/api/v1/users/me/notification-preferences', {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-
-export const getSavedPaymentMethods = () =>
-  authFetch<SavedPaymentMethod[]>('/api/v1/users/me/payment-methods');
-
-export const deleteSavedPaymentMethod = (paymentMethodId: string) =>
-  authFetch<void>(`/api/v1/users/me/payment-methods/${paymentMethodId}`, { method: 'DELETE' });
-
-export const setDefaultPaymentMethod = (paymentMethodId: string) =>
-  authFetch<SavedPaymentMethod>(`/api/v1/users/me/payment-methods/${paymentMethodId}/default`, {
-    method: 'PATCH',
-  });
-
-export const initiateAddPaymentMethod = () =>
-  authFetch<{ authorization_url: string }>('/api/v1/users/me/payment-methods/initiate', {
-    method: 'POST',
-  });
-
-// ─── Categories ───────────────────────────────────────────────────────────────
-
-export const fetchCategories = (params?: { search?: string; parent_id?: string; page?: number; limit?: number }) =>
-  publicFetch<PaginatedResponse<ApiCategory>>(`/api/v1/categories${buildQuery(params)}`);
-
-// ─── Products ─────────────────────────────────────────────────────────────────
-
-export const fetchProducts = (params?: {
-  page?: number;
-  limit?: number;
-  search?: string;
-  category_id?: string;
-  category_slug?: string;
-  store_id?: string;
-  min_price?: number;
-  max_price?: number;
-  in_stock?: boolean;
-}) =>
-  publicFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products${buildQuery(params)}`);
-
-export const fetchProductById = async (id: string): Promise<ApiProduct> => {
-  const res = await publicFetch<PaginatedResponse<ApiProduct> | ApiProduct>(
-    `/api/v1/products?id=${encodeURIComponent(id)}`
-  );
-  if (res && typeof res === 'object' && 'data' in res && Array.isArray((res as PaginatedResponse<ApiProduct>).data)) {
-    const item = (res as PaginatedResponse<ApiProduct>).data[0];
-    if (!item) throw new ApiError('Product not found', 404);
-    return item;
-  }
-  return res as ApiProduct;
-};
-
-// ─── Reviews ──────────────────────────────────────────────────────────────────
-
-export const fetchProductReviews = (productId: string, page = 1, limit = 20) =>
-  publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/products/${productId}${buildQuery({ page, limit })}`);
-
-export const fetchProductReviewSummary = (productId: string) =>
-  publicFetch<ReviewSummary>(`/api/v1/reviews/products/${productId}/summary`);
-
-export const fetchStoreReviews = (storeId: string, page = 1, limit = 20) =>
-  publicFetch<PaginatedResponse<ApiReview>>(`/api/v1/reviews/stores/${storeId}${buildQuery({ page, limit })}`);
-
-export const fetchStoreReviewSummary = (storeId: string) =>
-  publicFetch<ReviewSummary>(`/api/v1/reviews/stores/${storeId}/summary`);
-
-export const addProductReview = (productId: string, body: { rating: number; comment?: string; order_id?: string }) =>
-  authFetch<ApiReview>(`/api/v1/reviews/products/${productId}`, { method: 'POST', body: JSON.stringify(body) });
-
-export const deleteProductReview = (reviewId: string) =>
-  authFetch<void>(`/api/v1/reviews/products/reviews/${reviewId}`, { method: 'DELETE' });
-
-export const addStoreReview = (storeId: string, body: { rating: number; comment?: string }) =>
-  authFetch<ApiReview>(`/api/v1/reviews/stores/${storeId}`, { method: 'POST', body: JSON.stringify(body) });
-
-export const deleteStoreReview = (reviewId: string) =>
-  authFetch<void>(`/api/v1/reviews/stores/reviews/${reviewId}`, { method: 'DELETE' });
-
-// ─── Wishlist ─────────────────────────────────────────────────────────────────
-
-export interface WishlistItem {
-  id: string;
-  user_id: string;
-  product_id: string;
-  created_at: string;
-  product: ApiProduct;
-}
-
-export const getWishlist = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<WishlistItem>>(`/api/v1/wishlists${buildQuery({ page, limit })}`);
-
-export const addToWishlist = (productId: string) =>
-  authFetch<{ message: string }>('/api/v1/wishlists', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
-
-export const removeFromWishlist = (productId: string) =>
-  authFetch<{ message: string }>(`/api/v1/wishlists/${productId}`, { method: 'DELETE' });
-
-export const checkWishlist = (productId: string) =>
-  authFetch<{ in_wishlist: boolean }>(`/api/v1/wishlists/check${buildQuery({ product_id: productId })}`);
-
-// ─── Orders ───────────────────────────────────────────────────────────────────
-
-export const checkout = (body: CheckoutBody) =>
-  authFetch<{ orders: ApiOrder[]; payment_url?: string }>('/api/v1/orders/checkout', { method: 'POST', body: JSON.stringify(body) });
-
-export const getMyOrders = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiOrder>>(`/api/v1/orders/my${buildQuery({ page, limit })}`);
-
-export const getOrder = (orderId: string) => authFetch<ApiOrder>(`/api/v1/orders/my/${orderId}`);
-
-export const cancelOrder = (orderId: string) =>
-  authFetch<ApiOrder>(`/api/v1/orders/my/${orderId}/cancel`, { method: 'PATCH' });
-
-// ─── Businesses ───────────────────────────────────────────────────────────────
-
-export const fetchFeaturedBusinesses = () => publicFetch<ApiBusiness[]>('/api/v1/businesses/featured');
-
-export const getMyBusiness = () => authFetch<ApiBusiness>('/api/v1/businesses/my');
-
-export const updateMyBusiness = (body: Partial<ApiBusiness>) =>
-  authFetch<ApiBusiness>('/api/v1/businesses/my', { method: 'PUT', body: JSON.stringify(body) });
-
-// ─── Stores ───────────────────────────────────────────────────────────────────
-
-export const fetchPublicStores = (params?: {
-  category_slug?: string;
+  store_name: string;
+  store_tagline?: string;
+  description?: string;
   city?: string;
-  slug?: string;
-  status?: string;
-  page?: number;
-  limit?: number;
-}) =>
-  publicFetch<ApiStore[]>(`/api/v1/stores/public${buildQuery(params)}`);
+  state?: string;
+  area?: string;
+  address?: string;
+  logo_url?: string;
+  banner_url?: string;
+  whatsapp_number?: string;
+  return_policy?: string;
+  shipping_policy?: string;
+  category?: { id: string; name: string; slug: string } | string;
+  locations?: ApiStoreLocation[];
+  created_at: string;
+}
 
-export const getMyStores = () => authFetch<ApiStore[]>('/api/v1/stores/my');
+export interface ApiStoreLocation {
+  id: string;
+  store_id: string;
+  branch_name: string;
+  street: string;
+  city: string;
+  state?: string;
+  phone: string;
+  email?: string;
+  branch_manager?: string;
+  opening_hours?: string;
+  is_primary: boolean;
+  created_at: string;
+}
 
 export interface StoreLocationBody {
   branch_name: string;
@@ -662,176 +217,692 @@ export interface StoreLocationBody {
   city: string;
   phone: string;
   state?: string;
-  branch_manager?: string;
   email?: string;
+  branch_manager?: string;
   opening_hours?: string;
   is_primary?: boolean;
 }
 
-export type StoreBody = {
-  store_name: string;
-  delivery_fee?: number;
-  location: StoreLocationBody;
-  store_tagline?: string;
-  category_slug?: string;
-  description?: string;
-  whatsapp_number?: string;
-  return_policy?: string;
-  shipping_policy?: string;
-  logo_url?: string;
-  banner_url?: string;
-};
-
-export type UploadContext = 'avatar' | 'store-logo' | 'store-banner' | 'product' | 'kyc';
-
-export interface UploadResult {
-  url: string;
-  public_id: string;
-  width: number;
-  height: number;
-  format: string;
-  size_bytes: number;
-}
-
-export const uploadImage = async (file: File, context: UploadContext = 'product'): Promise<UploadResult> => {
-  const form = new FormData();
-  form.append('file', file);
-  return authFetch<UploadResult>(`/api/v1/uploads?context=${context}`, { method: 'POST', body: form });
-};
-
-export const createStore = (body: StoreBody) =>
-  authFetch<ApiStore>('/api/v1/stores', { method: 'POST', body: JSON.stringify(body) });
-
-export const updateStore = (storeId: string, body: Partial<Omit<StoreBody, 'location'>>) =>
-  authFetch<ApiStore>(`/api/v1/stores/${storeId}`, { method: 'PUT', body: JSON.stringify(body) });
-
-export const createStoreLocation = (storeId: string, body: StoreLocationBody) =>
-  authFetch<unknown>(`/api/v1/stores/${storeId}/locations`, { method: 'POST', body: JSON.stringify(body) });
-
-export const updateStoreLocation = (storeId: string, locationId: string, body: Partial<StoreLocationBody>) =>
-  authFetch<unknown>(`/api/v1/stores/${storeId}/locations/${locationId}`, { method: 'PUT', body: JSON.stringify(body) });
-
-export const logStoreVisit = (storeId: string) => {
-  const path = `/api/v1/stores/${storeId}/visitors`;
-  return tokenStore.getAccess()
-    ? authFetch<void>(path, { method: 'POST' })
-    : publicFetch<void>(path, { method: 'POST' });
-};
-
-// ─── Analytics ────────────────────────────────────────────────────────────────
-
-export const getStoreDashboard = (storeId: string, from?: string, to?: string) =>
-  authFetch<StoreDashboard>(`/api/v1/analytics/stores/${storeId}/dashboard${buildQuery({ from, to })}`);
-
-export const getStoreSnapshots = (storeId: string, limit = 7) =>
-  authFetch<PaginatedResponse<StoreSnapshot>>(`/api/v1/analytics/stores/${storeId}/snapshots${buildQuery({ limit })}`);
-
-export const getTopProducts = (storeId: string, limit = 10) =>
-  authFetch<ApiProduct[]>(`/api/v1/analytics/stores/${storeId}/top-products${buildQuery({ limit })}`);
-
-// ─── Wallet ───────────────────────────────────────────────────────────────────
-
-export const getWallet = () => authFetch<Wallet>('/api/v1/wallet');
-
-export const getWalletTransactions = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<WalletTransaction>>(`/api/v1/wallet/transactions${buildQuery({ page, limit })}`);
-
-export const saveBankDetails = (body: { account_number: string; bank_code: string }) =>
-  authFetch<{ message: string }>('/api/v1/wallet/bank-details', { method: 'PUT', body: JSON.stringify(body) });
-
-export const withdraw = (amount: number) =>
-  authFetch<{ message: string; transaction_id: string }>('/api/v1/wallet/withdraw', {
-    method: 'POST', body: JSON.stringify({ amount }),
-  });
-
-// ─── Seller products ──────────────────────────────────────────────────────────
-
-export const getStoreProducts = (storeId: string, page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiProduct>>(`/api/v1/products/stores/${storeId}${buildQuery({ page, limit })}`);
-
-export const createProduct = (storeId: string, body: {
-  name: string;
-  description?: string;
-  price: number;
-  discount_price?: number;
-  cost_price?: number;
-  stock_quantity: number;
-  category_id?: string;
-  images?: string[];
-}) =>
-  authFetch<ApiProduct>(`/api/v1/products/stores/${storeId}`, { method: 'POST', body: JSON.stringify(body) });
-
-export const updateProduct = (storeId: string, productId: string, body: Partial<ApiProduct>) =>
-  authFetch<ApiProduct>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'PATCH', body: JSON.stringify(body) });
-
-export const deleteProduct = (storeId: string, productId: string) =>
-  authFetch<void>(`/api/v1/products/stores/${storeId}/${productId}`, { method: 'DELETE' });
-
 export interface StoreProductStats {
   total_products: number;
-  active_products: number;
-  out_of_stock: number;
-  low_stock: number;
   inventory_value: number;
+  low_stock: number;
+  out_of_stock: number;
+  active_products: number;
 }
 
-export const fetchStoreProductStats = (storeId: string) =>
-  authFetch<StoreProductStats>(`/api/v1/products/stores/${storeId}/stats`);
+export type Product = ApiProduct;
 
-// ─── Seller orders ────────────────────────────────────────────────────────────
+// ── Axios Instance ───────────────────────────────────────────────────────────
+const apiClient: AxiosInstance = axios.create({
+  baseURL: BASE_URL,
+  timeout: REQUEST_TIMEOUT_MS,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
-export const getStoreOrders = (storeId: string, page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<ApiOrder>>(`/api/v1/orders/stores/${storeId}${buildQuery({ page, limit })}`);
+// ── Request Interceptor ──────────────────────────────────────────────────────
+apiClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = tokenStore.getAccess();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error: unknown) => Promise.reject(error)
+);
 
-export const updateOrderStatus = (orderId: string, status: 'processing' | 'shipped' | 'delivered' | 'cancelled') =>
-  authFetch<ApiOrder>(`/api/v1/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+// ── Response Interceptor ─────────────────────────────────────────────────────
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+}> = [];
 
-// ─── KYC ──────────────────────────────────────────────────────────────────────
+const processQueue = (error: unknown, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
 
-export const submitKyc = (body: { document_type: string; document_url: string; owner_type?: string; owner_id?: string }) =>
-  authFetch<KycSubmission>('/api/v1/kyc', { method: 'POST', body: JSON.stringify(body) });
+apiClient.interceptors.response.use(
+  (response: any) => response,
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-export const getMyKyc = (page = 1, limit = 20) =>
-  authFetch<PaginatedResponse<KycSubmission>>(`/api/v1/kyc/my${buildQuery({ page, limit })}`);
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return apiClient(originalRequest);
+          })
+          .catch((err) => {
+            tokenStore.clear();
+            window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+            return Promise.reject(err);
+          });
+      }
 
-// ─── Gigs ─────────────────────────────────────────────────────────────────────
+      isRefreshing = true;
+      originalRequest._retry = true;
 
-export const fetchPublicGigs = (city?: string) => publicFetch<ApiGig[]>(`/api/v1/gigs${buildQuery({ city })}`);
-export const getGig = (gigId: string) => publicFetch<ApiGig>(`/api/v1/gigs/${gigId}`);
+      try {
+        const refreshToken = tokenStore.getRefresh();
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
 
-export const createGig = (body: { title: string; description: string; city: string; fee: number }) =>
-  authFetch<ApiGig>('/api/v1/gigs', { method: 'POST', body: JSON.stringify(body) });
+        const response = await axios.post<AuthTokens>(
+          `${BASE_URL}/api/v1/auth/refresh`,
+          { refresh_token: refreshToken },
+          { timeout: REQUEST_TIMEOUT_MS }
+        );
 
-export const listGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/list`, { method: 'PATCH' });
-export const acceptGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/accept`, { method: 'PATCH' });
-export const startGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/start`, { method: 'PATCH' });
-export const deliverGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/deliver`, { method: 'PATCH' });
-export const cancelGig = (gigId: string) => authFetch<ApiGig>(`/api/v1/gigs/${gigId}/cancel`, { method: 'PATCH' });
+        const { access_token, refresh_token } = response.data;
+        tokenStore.setAccess(access_token);
+        if (refresh_token) {
+          tokenStore.setRefresh(refresh_token);
+        }
 
-export const getMyCreatedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/created${buildQuery({ page, limit })}`);
-export const getMyAssignedGigs = (page = 1, limit = 20) => authFetch<PaginatedResponse<ApiGig>>(`/api/v1/gigs/my/assigned${buildQuery({ page, limit })}`);
+        apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
+        originalRequest.headers.Authorization = `Bearer ${access_token}`;
 
-// ─── Map ApiProduct → local Product ──────────────────────────────────────────
+        processQueue(null, access_token);
+        isRefreshing = false;
 
-export function mapApiProduct(p: ApiProduct): Product {
-  const toNum = (v: unknown) => (v === null || v === undefined ? undefined : parseFloat(String(v)));
-  const price = toNum(p.price) ?? 0;
-  const discountPrice = toNum(p.discount_price);
+        return apiClient(originalRequest);
+      } catch (err) {
+        processQueue(err, null);
+        isRefreshing = false;
+        tokenStore.clear();
+        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+        return Promise.reject(err);
+      }
+    }
+
+    if (error.response?.status === 403) {
+      tokenStore.clear();
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// ── Helper Functions ─────────────────────────────────────────────────────────
+function handleError(error: unknown): never {
+  if (axios.isAxiosError(error)) {
+    const message = (error.response?.data as any)?.message || error.message || 'API request failed';
+    const status = error.response?.status || 0;
+    throw new ApiError(message, status, error.response?.data);
+  }
+  throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0);
+}
+
+// ── Authentication Endpoints ──────────────────────────────────────────────────
+export const loginUser = async (body: { email: string; password: string }): Promise<AuthResponse> => {
+  try {
+    const response = await apiClient.post<AuthResponse>('/api/v1/auth/login', body);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const registerUser = async (body: RegisterBody): Promise<AuthResponse> => {
+  try {
+    const response = await apiClient.post<AuthResponse>('/api/v1/auth/register', body);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const logoutUser = async (): Promise<void> => {
+  try {
+    await apiClient.post('/api/v1/auth/logout');
+  } catch (error) {
+    // Ignore errors on logout
+  } finally {
+    tokenStore.clear();
+  }
+};
+
+export const googleAuth = async (body: { id_token: string; role?: UserRole }): Promise<AuthResponse> => {
+  try {
+    const response = await apiClient.post<AuthResponse>('/api/v1/auth/google', body);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const refreshTokenFn = async (refreshToken: string): Promise<AuthTokens> => {
+  try {
+    const response = await apiClient.post<AuthTokens>('/api/v1/auth/refresh', {
+      refresh_token: refreshToken,
+    });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const verifyEmail = async (token: string): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/auth/verify-email', { token });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const forgotPassword = async (email: string): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/auth/forgot-password', { email });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const resetPassword = async (body: {
+  email: string;
+  otp: string;
+  password: string;
+}): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/auth/reset-password', body);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── User Endpoints ────────────────────────────────────────────────────────────
+export const getMe = async (): Promise<AuthUser> => {
+  try {
+    const response = await apiClient.get<{ data: AuthUser }>('/api/v1/users/me');
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateProfile = async (data: Partial<AuthUser>): Promise<AuthUser> => {
+  try {
+    const response = await apiClient.put<{ data: AuthUser }>('/api/v1/users/me', data);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const changePassword = async (currentPassword: string, newPassword: string): Promise<any> => {
+  try {
+    const response = await apiClient.patch('/api/v1/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const deleteAccount = async (): Promise<any> => {
+  try {
+    const response = await apiClient.delete('/api/v1/users/me');
+    tokenStore.clear();
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Address Endpoints ─────────────────────────────────────────────────────────
+export const getMyAddresses = async (): Promise<ApiAddress[]> => {
+  try {
+    const response = await apiClient.get<{ data: ApiAddress[] }>('/api/v1/users/me/addresses');
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const createAddress = async (data: Omit<ApiAddress, 'id'>): Promise<ApiAddress> => {
+  try {
+    const response = await apiClient.post<{ data: ApiAddress }>('/api/v1/users/me/addresses', data);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateAddress = async (addressId: string, data: Partial<ApiAddress>): Promise<ApiAddress> => {
+  try {
+    const response = await apiClient.put<{ data: ApiAddress }>(
+      `/api/v1/users/me/addresses/${addressId}`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const deleteAddress = async (addressId: string): Promise<any> => {
+  try {
+    const response = await apiClient.delete(`/api/v1/users/me/addresses/${addressId}`);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const setDefaultAddress = async (addressId: string): Promise<ApiAddress> => {
+  try {
+    const response = await apiClient.patch<{ data: ApiAddress }>(
+      `/api/v1/users/me/addresses/${addressId}/default`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Product Endpoints ─────────────────────────────────────────────────────────
+export const fetchProducts = async (params?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  category?: string;
+  min_price?: number;
+  max_price?: number;
+}): Promise<PaginatedResponse<ApiProduct>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
+      '/api/v1/products',
+      { params }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const fetchProductById = async (id: string): Promise<ApiProduct> => {
+  try {
+    const response = await apiClient.get<{ data: ApiProduct }>(`/api/v1/products/${id}`);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const fetchProductsByIds = async (ids: string[]): Promise<ApiProduct[]> => {
+  try {
+    const response = await apiClient.post<{ data: ApiProduct[] }>('/api/v1/products/batch', {
+      ids,
+    });
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const searchProducts = async (query: string, limit = 10): Promise<PaginatedResponse<ApiProduct>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
+      '/api/v1/products/search',
+      { params: { q: query, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Categories Endpoints ──────────────────────────────────────────────────────
+export const fetchCategories = async (params?: { limit?: number; page?: number }): Promise<PaginatedResponse<ApiCategory>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiCategory>>(
+      '/api/v1/categories',
+      { params }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Orders Endpoints ──────────────────────────────────────────────────────────
+export const checkout = async (data: CheckoutBody): Promise<{ orders: ApiOrder[]; payment_url?: string }> => {
+  try {
+    const response = await apiClient.post<{
+      data: { orders: ApiOrder[]; payment_url?: string };
+    }>('/api/v1/orders/checkout', data);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getMyOrders = async (page = 1, limit = 20): Promise<PaginatedResponse<ApiOrder>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiOrder>>(
+      '/api/v1/orders/my',
+      { params: { page, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getOrder = async (orderId: string): Promise<ApiOrder> => {
+  try {
+    const response = await apiClient.get<{ data: ApiOrder }>(`/api/v1/orders/my/${orderId}`);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const cancelOrder = async (orderId: string): Promise<ApiOrder> => {
+  try {
+    const response = await apiClient.patch<{ data: ApiOrder }>(
+      `/api/v1/orders/my/${orderId}/cancel`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Wishlist Endpoints ────────────────────────────────────────────────────────
+export interface WishlistItem {
+  id: string;
+  product_id: string;
+  product: ApiProduct;
+  created_at: string;
+}
+
+export const getWishlist = async (page = 1, limit = 20): Promise<PaginatedResponse<WishlistItem>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<WishlistItem>>(
+      '/api/v1/wishlists',
+      { params: { page, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const addToWishlist = async (productId: string): Promise<any> => {
+  try {
+    const response = await apiClient.post('/api/v1/wishlists', { product_id: productId });
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const removeFromWishlist = async (productId: string): Promise<any> => {
+  try {
+    const response = await apiClient.delete(`/api/v1/wishlists/${productId}`);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Reviews Endpoints ─────────────────────────────────────────────────────────
+export const getProductReviews = async (productId: string, page = 1, limit = 10): Promise<PaginatedResponse<any>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<any>>(
+      `/api/v1/reviews/products/${productId}`,
+      { params: { page, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const addProductReview = async (
+  productId: string,
+  data: { rating: number; comment?: string }
+): Promise<any> => {
+  try {
+    const response = await apiClient.post(`/api/v1/reviews/products/${productId}`, data);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Business/Seller Endpoints ──────────────────────────────────────────────────
+export const getDashboard = async (): Promise<any> => {
+  try {
+    const response = await apiClient.get<{ data: any }>('/api/v1/analytics/dashboard');
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreDashboard = async (storeId?: string): Promise<any> => {
+  try {
+    const response = await apiClient.get<{ data: any }>(
+      `/api/v1/analytics/dashboard${storeId ? `?store_id=${storeId}` : ''}`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreAnalytics = async (storeId?: string): Promise<any> => {
+  try {
+    const response = await apiClient.get<{ data: any }>(
+      `/api/v1/analytics/sales${storeId ? `?store_id=${storeId}` : ''}`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreOrders = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiOrder>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiOrder>>(
+      `/api/v1/stores/${storeId}/orders`,
+      { params: { page, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreInventory = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiProduct>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
+      `/api/v1/stores/${storeId}/products`,
+      { params: { page, limit } }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const createProduct = async (storeId: string, data: Partial<ApiProduct>): Promise<ApiProduct> => {
+  try {
+    const response = await apiClient.post<{ data: ApiProduct }>(
+      `/api/v1/stores/${storeId}/products`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateProduct = async (storeId: string, productId: string, data: Partial<ApiProduct>): Promise<ApiProduct> => {
+  try {
+    const response = await apiClient.put<{ data: ApiProduct }>(
+      `/api/v1/stores/${storeId}/products/${productId}`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const deleteProduct = async (storeId: string, productId: string): Promise<any> => {
+  try {
+    const response = await apiClient.delete(`/api/v1/stores/${storeId}/products/${productId}`);
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const fetchStoreProductStats = async (storeId: string): Promise<StoreProductStats> => {
+  try {
+    const response = await apiClient.get<{ data: StoreProductStats }>(
+      `/api/v1/stores/${storeId}/products/stats`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getMyStores = async (): Promise<ApiStore[]> => {
+  try {
+    const response = await apiClient.get<{ data: ApiStore[] }>('/api/v1/stores/my');
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const createStore = async (data: any): Promise<ApiStore> => {
+  try {
+    const response = await apiClient.post<{ data: ApiStore }>('/api/v1/stores', data);
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateStore = async (storeId: string, data: Partial<ApiStore>): Promise<ApiStore> => {
+  try {
+    const response = await apiClient.put<{ data: ApiStore }>(
+      `/api/v1/stores/${storeId}`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const createStoreLocation = async (storeId: string, data: StoreLocationBody): Promise<ApiStoreLocation> => {
+  try {
+    const response = await apiClient.post<{ data: ApiStoreLocation }>(
+      `/api/v1/stores/${storeId}/locations`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateStoreLocation = async (storeId: string, locationId: string, data: Partial<StoreLocationBody>): Promise<ApiStoreLocation> => {
+  try {
+    const response = await apiClient.put<{ data: ApiStoreLocation }>(
+      `/api/v1/stores/${storeId}/locations/${locationId}`,
+      data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const uploadImage = async (file: File, context: UploadContext): Promise<{ url: string }> => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('context', context);
+    const response = await apiClient.post<{ data: { url: string } }>('/api/v1/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const updateOrderStatus = async (orderId: string, status: string): Promise<ApiOrder> => {
+  try {
+    const response = await apiClient.patch<{ data: ApiOrder }>(
+      `/api/v1/orders/${orderId}/status`,
+      { status }
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Utility Functions ─────────────────────────────────────────────────────────
+export function mapApiProduct(p: ApiProduct): any {
+  const price = p.price ?? 0;
+  const discountPrice = p.discount_price;
   const effectivePrice = discountPrice ?? price;
+
   return {
     id: p.id,
     name: p.name,
     price: effectivePrice,
     originalPrice: discountPrice ? price : undefined,
     image: p.images?.[0] || '/images/product-placeholder.webp',
-    category: p.category?.slug ?? p.category?.id ?? '',
+    category: p.category?.slug ?? '',
     rating: p.average_rating ?? 0,
     reviews: p.review_count ?? 0,
     description: p.description,
     brand: p.store?.store_name ?? '',
     inStock: ['in_stock', 'low_stock'].includes(p.stock_status),
-    discount: discountPrice && price
-      ? Math.round((1 - discountPrice / price) * 100)
-      : undefined,
+    discount: discountPrice && price ? Math.round((1 - discountPrice / price) * 100) : undefined,
   };
 }
+
+export function setAuthToken(token: string | null) {
+  if (token) {
+    tokenStore.setAccess(token);
+    apiClient.defaults.headers.common.Authorization = `Bearer ${token}`;
+  } else {
+    tokenStore.clear();
+    delete apiClient.defaults.headers.common.Authorization;
+  }
+}
+
+export default apiClient;

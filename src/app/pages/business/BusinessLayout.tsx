@@ -22,7 +22,11 @@ const bottomNavItems = [
   { label: 'Settings', path: '/business/settings', icon: Settings },
 ];
 
-export function BusinessLayout() {
+interface BusinessLayoutProps {
+  children?: React.ReactNode;
+}
+
+export function BusinessLayout({ children }: BusinessLayoutProps = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -381,6 +385,7 @@ export function BusinessLayout() {
             </h1>
           </div>
 
+          {children}
           <Outlet />
         </main>
       </div>

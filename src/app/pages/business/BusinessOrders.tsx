@@ -11,8 +11,6 @@ import {
   type ApiStore,
 } from '../../services/api';
 
-// ─── Status config with inventory awareness ─────────────────────────────────
-
 const STATUS_CFG: Record<string, { bg: string; text: string; darkBg: string; darkText: string; icon: React.ElementType; label: string }> = {
   pending:    { bg: '#FEF3C7', text: '#D97706', darkBg: 'rgba(217,119,6,0.15)',   darkText: '#FCD34D', icon: Clock,        label: 'Pending'    },
   processing: { bg: '#DBEAFE', text: '#2563EB', darkBg: 'rgba(37,99,235,0.15)',   darkText: '#93C5FD', icon: Package,      label: 'Processing' },
@@ -32,8 +30,6 @@ const NEXT_STATUS: Record<string, { status: NextStatus; label: string; color: st
   cancelled:  null,
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 }
@@ -50,8 +46,6 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
-
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function TableSkeleton() {
   return (
@@ -73,8 +67,6 @@ function TableSkeleton() {
     </div>
   );
 }
-
-// ─── Order detail modal ───────────────────────────────────────────────────────
 
 function OrderDetailModal({
   order,
@@ -111,7 +103,6 @@ function OrderDetailModal({
         className="bg-white dark:bg-gray-900 w-full sm:rounded-2xl sm:max-w-md shadow-2xl overflow-hidden rounded-t-2xl max-h-[92vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div
           className="px-5 sm:px-6 py-4 sm:py-5 flex items-center justify-between"
           style={{ background: 'linear-gradient(135deg, #1A0812, #8B1538)' }}
@@ -141,7 +132,6 @@ function OrderDetailModal({
             </div>
           )}
 
-          {/* Meta */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-gray-400 mb-1">Payment Method</p>
@@ -175,7 +165,6 @@ function OrderDetailModal({
             </div>
           </div>
 
-          {/* Order items if available */}
           {order.items && order.items.length > 0 && (
             <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
               <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Items</p>
@@ -190,7 +179,6 @@ function OrderDetailModal({
             </div>
           )}
 
-          {/* Payment link */}
           {order.payment_url && (
             <a
               href={order.payment_url}
@@ -203,7 +191,6 @@ function OrderDetailModal({
           )}
         </div>
 
-        {/* Actions */}
         <div className="px-4 sm:px-6 pb-5 sm:pb-6 flex flex-col xs:flex-row gap-3">
           {next && (
             <button
@@ -226,8 +213,6 @@ function OrderDetailModal({
     </div>
   );
 }
-
-// ─── Mobile order card ────────────────────────────────────────────────────────
 
 function OrderCard({ order, onClick }: { order: ApiOrder; onClick: () => void }) {
   return (
@@ -257,8 +242,6 @@ function OrderCard({ order, onClick }: { order: ApiOrder; onClick: () => void })
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-
 export function BusinessOrders() {
   const [orders, setOrders] = useState<ApiOrder[]>([]);
   const [storeId, setStoreId] = useState<string | null>(null);
@@ -272,7 +255,6 @@ export function BusinessOrders() {
   const [total, setTotal] = useState(0);
   const PAGE_SIZE = 20;
 
-  // ── Load store id then orders ──
   const load = useCallback(async (p = 1) => {
     setLoading(true);
     setError(null);
@@ -280,13 +262,12 @@ export function BusinessOrders() {
       let sid = storeId;
       if (!sid) {
         const res = await getMyStores();
-        const storeList = Array.isArray(res) ? res : (res as { data?: ApiStore[] }).data ?? [];
+        const storeList = Array.isArray(res) ? res : (res as any);
         sid = storeList[0]?.id ?? null;
         if (sid) setStoreId(sid);
       }
       if (!sid) throw new Error('No store found for this account.');
       
-      // Load orders for the store - backend handles inventory tracking
       const res = await getStoreOrders(sid, p, PAGE_SIZE);
       setOrders(prev => p === 1 ? res.data : [...prev, ...res.data]);
       setTotal(res.total);
@@ -300,18 +281,13 @@ export function BusinessOrders() {
 
   useEffect(() => { load(1); }, [load]);
 
-  // ── Status update with inventory sync ──
   const handleStatusUpdate = async (orderId: string, status: NextStatus) => {
-    // Backend updates order status and handles inventory/wallet transactions
     await updateOrderStatus(orderId, status);
-    
-    // Update local state
     setOrders(prev =>
       prev.map(o => o.id === orderId ? { ...o, status } : o)
     );
   };
 
-  // ── Filter + sort ──
   const filtered = useMemo(() => {
     let list = orders.filter(o => {
       const q = search.toLowerCase();
@@ -326,7 +302,6 @@ export function BusinessOrders() {
     return list;
   }, [orders, search, statusFilter, sortDesc]);
 
-  // ── Counts ──
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: orders.length };
     ALL_STATUSES.forEach(s => {
@@ -336,8 +311,6 @@ export function BusinessOrders() {
   }, [orders]);
 
   const hasMore = orders.length < total;
-
-  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -349,7 +322,6 @@ export function BusinessOrders() {
         />
       )}
 
-      {/* ── Status tabs ── */}
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
         {ALL_STATUSES.map(s => {
           const cfg = s !== 'all' ? STATUS_CFG[s] : null;
@@ -383,7 +355,6 @@ export function BusinessOrders() {
         })}
       </div>
 
-      {/* ── Search + sort bar ── */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-3 sm:p-4 shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col xs:flex-row items-stretch xs:items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -417,7 +388,6 @@ export function BusinessOrders() {
         </div>
       </div>
 
-      {/* ── Error ── */}
       {error && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3 text-red-600 dark:text-red-400 text-sm">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -428,7 +398,6 @@ export function BusinessOrders() {
         </div>
       )}
 
-      {/* ── Mobile cards (xs–md) ── */}
       <div className="md:hidden space-y-3">
         {loading
           ? Array.from({ length: 5 }).map((_, i) => (
@@ -447,7 +416,6 @@ export function BusinessOrders() {
         }
       </div>
 
-      {/* ── Desktop table (md+) ── */}
       <div className="hidden md:block bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -514,7 +482,6 @@ export function BusinessOrders() {
         </div>
       </div>
 
-      {/* ── Load more ── */}
       {!loading && hasMore && (
         <div className="flex justify-center pt-2">
           <button
@@ -534,3 +501,5 @@ export function BusinessOrders() {
     </div>
   );
 }
+
+export default BusinessOrders;

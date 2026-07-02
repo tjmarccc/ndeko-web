@@ -6,6 +6,7 @@ import {
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { useAuth } from '../../contexts/AuthContext';
+import { getDashboard } from '../../services/api';
 
 interface DashboardMetrics {
   total_sales: number;
@@ -117,18 +118,28 @@ export function BusinessDashboard() {
 
   const fetchDashboard = async () => {
     try {
-      const res = await fetch('/api/v1/analytics/dashboard', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('ndeko_token')}` },
-      });
-
-      if (!res.ok) throw new Error('Failed to fetch dashboard');
-      const data = await res.json();
+      const data = await getDashboard();
       setMetrics(data);
       setError(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load dashboard';
       setError(msg);
       console.error('Dashboard error:', err);
+      
+      // Fallback: use default/empty state
+      setMetrics({
+        total_sales: 0,
+        total_orders: 0,
+        total_products: 0,
+        total_customers: 0,
+        pending_orders: 0,
+        views_today: 0,
+        likes_today: 0,
+        sales_growth: 0,
+        orders_growth: 0,
+        recent_orders: [],
+        top_products: [],
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -190,139 +201,149 @@ export function BusinessDashboard() {
               Error loading dashboard
             </h3>
             <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+            <button
+              onClick={handleRefresh}
+              className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors text-red-700 dark:text-red-300"
+            >
+              Retry
+            </button>
           </div>
         </div>
       )}
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
-        <StatCard
-          label="Total Sales"
-          value={`₦${metrics?.total_sales.toLocaleString() || '0'}`}
-          change={metrics?.sales_growth}
-          trend={metrics?.sales_growth ? (metrics.sales_growth > 0 ? 'up' : 'down') : 'neutral'}
-          icon={<DollarSign className="h-5 w-5" />}
-        />
+      {metrics && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+            <StatCard
+              label="Total Sales"
+              value={`₦${(metrics.total_sales ?? 0).toLocaleString()}`}
+              change={metrics.sales_growth}
+              trend={metrics.sales_growth ? (metrics.sales_growth > 0 ? 'up' : 'down') : 'neutral'}
+              icon={<DollarSign className="h-5 w-5" />}
+            />
 
-        <StatCard
-          label="Orders"
-          value={metrics?.total_orders || '0'}
-          change={metrics?.orders_growth}
-          trend={metrics?.orders_growth ? (metrics.orders_growth > 0 ? 'up' : 'down') : 'neutral'}
-          icon={<ShoppingBag className="h-5 w-5" />}
-        />
+            <StatCard
+              label="Orders"
+              value={metrics.total_orders ?? 0}
+              change={metrics.orders_growth}
+              trend={metrics.orders_growth ? (metrics.orders_growth > 0 ? 'up' : 'down') : 'neutral'}
+              icon={<ShoppingBag className="h-5 w-5" />}
+            />
 
-        <StatCard
-          label="Products"
-          value={metrics?.total_products || '0'}
-          icon={<Package className="h-5 w-5" />}
-        />
+            <StatCard
+              label="Products"
+              value={metrics.total_products ?? 0}
+              icon={<Package className="h-5 w-5" />}
+            />
 
-        <StatCard
-          label="Customers"
-          value={metrics?.total_customers || '0'}
-          icon={<TrendingUp className="h-5 w-5" />}
-        />
-      </div>
+            <StatCard
+              label="Customers"
+              value={metrics.total_customers ?? 0}
+              icon={<TrendingUp className="h-5 w-5" />}
+            />
+          </div>
 
-      {/* Secondary metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-8">
-        <StatCard
-          label="Views Today"
-          value={metrics?.views_today || '0'}
-          icon={<Eye className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Likes Today"
-          value={metrics?.likes_today || '0'}
-          icon={<Heart className="h-5 w-5" />}
-        />
-      </div>
+          {/* Secondary metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-8">
+            <StatCard
+              label="Views Today"
+              value={metrics.views_today ?? 0}
+              icon={<Eye className="h-5 w-5" />}
+            />
+            <StatCard
+              label="Likes Today"
+              value={metrics.likes_today ?? 0}
+              icon={<Heart className="h-5 w-5" />}
+            />
+          </div>
 
-      {/* Recent orders */}
-      {metrics?.recent_orders && metrics.recent_orders.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Recent Orders</h2>
-          <div className="grid gap-3">
-            {metrics.recent_orders.slice(0, 5).map((order) => (
-              <Card
-                key={order.id}
-                className="p-4 dark:bg-gray-800 dark:border-gray-700 flex items-center justify-between"
-              >
-                <div>
-                  <p className="font-semibold dark:text-white text-sm sm:text-base">
-                    {order.order_number}
-                  </p>
-                  <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                    {order.items_count} items • {new Date(order.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-[#8B1538] dark:text-[#D4828F] text-sm sm:text-base">
-                    ₦{order.total_amount.toLocaleString()}
-                  </p>
-                  <p
-                    className={`text-xs sm:text-sm font-medium ${
-                      order.status === 'COMPLETED'
-                        ? 'text-green-600 dark:text-green-400'
-                        : order.status === 'PENDING'
-                        ? 'text-yellow-600 dark:text-yellow-400'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}
+          {/* Recent orders */}
+          {metrics.recent_orders && metrics.recent_orders.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Recent Orders</h2>
+              <div className="grid gap-3">
+                {metrics.recent_orders.slice(0, 5).map((order) => (
+                  <Card
+                    key={order.id}
+                    className="p-4 dark:bg-gray-800 dark:border-gray-700 flex items-center justify-between"
                   >
-                    {order.status.replace('_', ' ')}
-                  </p>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
+                    <div>
+                      <p className="font-semibold dark:text-white text-sm sm:text-base">
+                        {order.order_number}
+                      </p>
+                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                        {order.items_count} items • {new Date(order.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-[#8B1538] dark:text-[#D4828F] text-sm sm:text-base">
+                        ₦{(order.total_amount ?? 0).toLocaleString()}
+                      </p>
+                      <p
+                        className={`text-xs sm:text-sm font-medium ${
+                          order.status === 'COMPLETED'
+                            ? 'text-green-600 dark:text-green-400'
+                            : order.status === 'PENDING'
+                            ? 'text-yellow-600 dark:text-yellow-400'
+                            : 'text-gray-600 dark:text-gray-400'
+                        }`}
+                      >
+                        {order.status.replace('_', ' ')}
+                      </p>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* Top products */}
-      {metrics?.top_products && metrics.top_products.length > 0 && (
-        <div>
-          <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Top Products</h2>
-          <div className="grid gap-3">
-            {metrics.top_products.slice(0, 5).map((product) => (
-              <Card
-                key={product.id}
-                className="p-4 dark:bg-gray-800 dark:border-gray-700"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold dark:text-white text-sm sm:text-base line-clamp-2">
-                    {product.name}
-                  </h3>
-                  <span className="text-xs sm:text-sm font-bold text-[#8B1538] dark:text-[#D4828F]">
-                    ₦{product.price.toLocaleString()}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-xs sm:text-sm">
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Sales</span>
-                    <p className="font-bold dark:text-white">{product.sales_count}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Views</span>
-                    <p className="font-bold dark:text-white">{product.views}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Stock</span>
-                    <p
-                      className={`font-bold ${
-                        product.stock_quantity > 0
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}
-                    >
-                      {product.stock_quantity}
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
+          {/* Top products */}
+          {metrics.top_products && metrics.top_products.length > 0 && (
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Top Products</h2>
+              <div className="grid gap-3">
+                {metrics.top_products.slice(0, 5).map((product) => (
+                  <Card
+                    key={product.id}
+                    className="p-4 dark:bg-gray-800 dark:border-gray-700"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold dark:text-white text-sm sm:text-base line-clamp-2">
+                        {product.name}
+                      </h3>
+                      <span className="text-xs sm:text-sm font-bold text-[#8B1538] dark:text-[#D4828F]">
+                        ₦{(product.price ?? 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-xs sm:text-sm">
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Sales</span>
+                        <p className="font-bold dark:text-white">{product.sales_count ?? 0}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Views</span>
+                        <p className="font-bold dark:text-white">{product.views ?? 0}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Stock</span>
+                        <p
+                          className={`font-bold ${
+                            (product.stock_quantity ?? 0) > 0
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}
+                        >
+                          {product.stock_quantity ?? 0}
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

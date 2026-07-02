@@ -1,18 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router';
 import {
-  Lock, Truck, CreditCard, Wallet,
-  ArrowLeft, AlertCircle, Loader2, CheckCircle2, Shield,
+  Lock, Truck, CreditCard, Wallet, ArrowLeft, AlertCircle, Loader2, CheckCircle2, Shield,
 } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { checkout, getMyAddresses, type CheckoutBody, type ApiAddress } from '../services/api';
+import * as api from '../services/api';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { toast } from 'sonner';
 
 interface ShippingForm {
   recipient_name: string;
@@ -24,146 +22,159 @@ interface ShippingForm {
 
 type PaymentMethod = 'card' | 'bank_transfer' | 'pay_on_delivery';
 
-// ─── CHECKOUT PAGE ────────────────────────────────────────────────────────────
 export function Checkout() {
   const { cart, cartTotal, clearCart } = useCart();
-  const { token, user } = useAuth();
+  const { user, token } = useAuth();
   const navigate = useNavigate();
 
-  // ── Form state ──────────────────────────────────────────────────────────────
   const [shipping, setShipping] = useState<ShippingForm>({
-    recipient_name: '', recipient_phone: '', street: '', city: '', state: '',
+    recipient_name: user?.first_name ? `${user.first_name} ${user.last_name}` : '',
+    recipient_phone: user?.phone || '',
+    street: '',
+    city: '',
+    state: '',
   });
+
+  const [addresses, setAddresses] = useState<api.ApiAddress[]>([]);
   const [payment, setPayment] = useState<PaymentMethod>('card');
-  const [promo, setPromo]     = useState('');
+  const [promo, setPromo] = useState('');
   const [promoApplied, setPromoApplied] = useState(false);
-
-  // ── Saved addresses ─────────────────────────────────────────────────────────
-  const [addresses, setAddresses] = useState<ApiAddress[]>([]);
-
-  // ── API state ───────────────────────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError]               = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors]   = useState<Partial<ShippingForm>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<ShippingForm>>({});
+  const [loadingAddresses, setLoadingAddresses] = useState(false);
 
-  // ── Pre-fill from authenticated user + load saved addresses ─────────────────
-  useEffect(() => {
-    if (!token) { navigate('/login?redirect=/checkout'); return; }
-    if (user) {
-      setShipping(prev => ({
-        ...prev,
-        recipient_name:  prev.recipient_name  || user.name  || `${user.first_name} ${user.last_name}`.trim() || '',
-        recipient_phone: prev.recipient_phone || user.phone || '',
-      }));
-    }
-    getMyAddresses().then(list => {
-      const addrs = Array.isArray(list) ? list : [];
-      setAddresses(addrs);
-      const def = addrs.find(a => a.is_default) ?? addrs[0];
-      if (def) {
-        setShipping({
-          recipient_name:  def.recipient_name  ?? '',
-          recipient_phone: def.recipient_phone ?? '',
-          street:          def.street,
-          city:            def.city,
-          state:           def.state,
-        });
-      }
-    }).catch(() => { /* non-blocking */ });
-  }, [user, token, navigate]);
-
-  // ── Pricing ─────────────────────────────────────────────────────────────────
   const VALID_PROMOS: Record<string, number> = {
     WELCOME10: 0.10,
-    NDEKO20:   0.20,
-    SAVE5:     0.05,
+    NDEKO20: 0.20,
+    SAVE5: 0.05,
   };
-  const promoKey     = promo.trim().toUpperCase();
-  const discount     = promoApplied && VALID_PROMOS[promoKey]
+
+  const promoKey = promo.trim().toUpperCase();
+  const discount = promoApplied && VALID_PROMOS[promoKey]
     ? Math.round(cartTotal * VALID_PROMOS[promoKey])
     : 0;
-  const shippingFee  = cartTotal >= 20000 ? 0 : 2000;
-  const total        = cartTotal + shippingFee - discount;
+  const shippingFee = cartTotal >= 20000 ? 0 : 2000;
+  const total = cartTotal + shippingFee - discount;
 
-  // ── Field validation ────────────────────────────────────────────────────────
-  function validateForm(): boolean {
+  // Load saved addresses
+  useEffect(() => {
+    if (!token) {
+      navigate(`/login?redirect=${encodeURIComponent('/checkout')}`);
+      return;
+    }
+
+    const loadAddresses = async () => {
+      try {
+        setLoadingAddresses(true);
+        const response = await api.getMyAddresses();
+        setAddresses(response || []);
+
+        // Pre-fill with default address
+        const defaultAddr = response?.find((a) => a.is_default);
+        if (defaultAddr) {
+          setShipping({
+            recipient_name: defaultAddr.recipient_name || '',
+            recipient_phone: defaultAddr.recipient_phone || '',
+            street: defaultAddr.street,
+            city: defaultAddr.city,
+            state: defaultAddr.state || '',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load addresses:', err);
+      } finally {
+        setLoadingAddresses(false);
+      }
+    };
+
+    loadAddresses();
+  }, [token, navigate]);
+
+  const validateForm = (): boolean => {
     const errs: Partial<ShippingForm> = {};
-    if (!shipping.recipient_name.trim())  errs.recipient_name  = 'Full name is required';
+    if (!shipping.recipient_name.trim()) errs.recipient_name = 'Full name is required';
     if (!shipping.recipient_phone.trim()) errs.recipient_phone = 'Phone number is required';
-    if (!shipping.street.trim())          errs.street          = 'Address is required';
-    if (!shipping.city.trim())            errs.city            = 'City is required';
-    if (!shipping.state.trim())           errs.state           = 'State is required';
+    if (!shipping.street.trim()) errs.street = 'Address is required';
+    if (!shipping.city.trim()) errs.city = 'City is required';
+    if (!shipping.state.trim()) errs.state = 'State is required';
+
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
-  }
+  };
 
-  // ── Apply promo ─────────────────────────────────────────────────────────────
   const handleApplyPromo = () => {
     if (VALID_PROMOS[promoKey]) {
       setPromoApplied(true);
       setError(null);
+      toast.success(`Promo code ${promoKey} applied!`);
     } else {
-      setError('Invalid promo code. Try WELCOME10.');
+      setError('Invalid promo code. Try WELCOME10, NDEKO20, or SAVE5.');
       setPromoApplied(false);
     }
   };
 
-  // ── Submit → POST /api/v1/orders/checkout ───────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!token) { navigate('/login?redirect=/checkout'); return; }
-    if (!validateForm()) return;
-    if (cart.length === 0) { setError('Your cart is empty.'); return; }
+    if (!token || !user) {
+      navigate(`/login?redirect=${encodeURIComponent('/checkout')}`);
+      return;
+    }
+
+    if (!validateForm()) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    if (cart.length === 0) {
+      setError('Your cart is empty.');
+      return;
+    }
 
     setIsSubmitting(true);
 
-    const body: CheckoutBody = {
-      items: cart.map(item => ({
-        product_id: item.id,
-        quantity:   item.quantity,
-      })),
-      delivery_address: {
-        recipient_name:  shipping.recipient_name.trim(),
-        recipient_phone: shipping.recipient_phone.trim(),
-        street:          shipping.street.trim(),
-        city:            shipping.city.trim(),
-        state:           shipping.state.trim(),
-      },
-      payment_method: payment,
-      ...(promoApplied && promoKey ? { promo_code: promoKey } : {}),
-    };
-
     try {
-      const data = await checkout(body);
+      const body: api.CheckoutBody = {
+        items: cart.map((item) => ({
+          product_id: item.id,
+          quantity: item.quantity,
+        })),
+        delivery_address: {
+          recipient_name: shipping.recipient_name.trim(),
+          recipient_phone: shipping.recipient_phone.trim(),
+          street: shipping.street.trim(),
+          city: shipping.city.trim(),
+          state: shipping.state.trim(),
+        },
+        payment_method: payment,
+        ...(promoApplied && promoKey ? { promo_code: promoKey } : {}),
+      };
 
-      // ── Paystack redirect ──────────────────────────────────────────────────
-      if (data.payment_url) {
+      const response = await api.checkout(body);
+
+      if (response?.payment_url) {
         clearCart();
-        window.location.href = data.payment_url;
+        window.location.href = response.payment_url;
         return;
       }
 
-      // ── Direct confirmation (bank transfer / wallet / POD) ─────────────────
-      const firstOrder = data.orders?.[0];
+      const firstOrder = response?.orders?.[0];
       clearCart();
       navigate(
-        `/order-confirmation?id=${firstOrder?.order_number ?? firstOrder?.id ?? 'NDK-00000'}`,
-        { state: { orderData: data } }
+        `/order-confirmation?id=${firstOrder?.order_number || firstOrder?.id || 'NDK-00000'}`,
+        { state: { orderData: response } }
       );
-    } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : 'Checkout failed. Please try again.';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Checkout failed. Please try again.';
       setError(msg);
-      // Scroll to top so user sees the error
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ── Empty cart guard ────────────────────────────────────────────────────────
   if (cart.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
@@ -183,33 +194,36 @@ export function Checkout() {
     );
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
   const Field = ({
-    id, label, value, onChange, placeholder, required = true, error: fe, type = 'text',
+    id,
+    label,
+    value,
+    onChange,
+    placeholder,
+    type = 'text',
+    error: fe,
   }: {
     id: keyof ShippingForm;
     label: string;
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
-    required?: boolean;
-    error?: string;
     type?: string;
+    error?: string;
   }) => (
     <div>
       <Label htmlFor={id} className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+        {label}<span className="text-red-500 ml-0.5">*</span>
       </Label>
       <Input
         id={id}
         type={type}
         value={value}
-        onChange={e => {
+        onChange={(e) => {
           onChange(e.target.value);
-          if (fieldErrors[id]) setFieldErrors(prev => ({ ...prev, [id]: undefined }));
+          if (fieldErrors[id]) setFieldErrors((prev) => ({ ...prev, [id]: undefined }));
         }}
         placeholder={placeholder}
-        required={required}
         className={`h-11 ${fe ? 'border-red-400 focus:ring-red-300' : ''}`}
       />
       {fe && <p className="text-red-500 text-xs mt-1">{fe}</p>}
@@ -217,7 +231,10 @@ export function Checkout() {
   );
 
   const PaymentOption = ({
-    value, icon: Icon, label, sublabel,
+    value,
+    icon: Icon,
+    label,
+    sublabel,
   }: {
     value: PaymentMethod;
     icon: React.ElementType;
@@ -239,15 +256,20 @@ export function Checkout() {
         onChange={() => setPayment(value)}
         className="sr-only"
       />
-      {/* Custom radio */}
-      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-        payment === value ? 'border-[#8B1538]' : 'border-gray-300 dark:border-gray-600'
-      }`}>
+      <div
+        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+          payment === value ? 'border-[#8B1538]' : 'border-gray-300 dark:border-gray-600'
+        }`}
+      >
         {payment === value && <div className="w-2 h-2 rounded-full bg-[#8B1538]" />}
       </div>
       <Icon className={`h-4 w-4 shrink-0 ${payment === value ? 'text-[#8B1538]' : 'text-gray-400'}`} />
       <div className="min-w-0">
-        <p className={`text-sm font-semibold ${payment === value ? 'text-[#8B1538] dark:text-[#D4828F]' : 'text-gray-800 dark:text-gray-200'}`}>
+        <p
+          className={`text-sm font-semibold ${
+            payment === value ? 'text-[#8B1538] dark:text-[#D4828F]' : 'text-gray-800 dark:text-gray-200'
+          }`}
+        >
           {label}
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400">{sublabel}</p>
@@ -255,16 +277,13 @@ export function Checkout() {
     </label>
   );
 
-  // ── Progress steps ──────────────────────────────────────────────────────────
   const steps = ['Cart', 'Checkout', 'Confirmation'];
   const currentStep = 1;
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8 max-w-6xl">
-
-        {/* ── Back + breadcrumb ── */}
+        {/* Back button */}
         <div className="mb-4 sm:mb-6">
           <Button
             variant="ghost"
@@ -281,36 +300,40 @@ export function Checkout() {
             {steps.map((step, i) => (
               <div key={step} className="flex items-center">
                 <div className="flex items-center gap-1.5">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                    i < currentStep
-                      ? 'bg-green-500 text-white'
-                      : i === currentStep
-                      ? 'bg-[#8B1538] text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
-                  }`}>
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                      i < currentStep
+                        ? 'bg-green-500 text-white'
+                        : i === currentStep
+                        ? 'bg-[#8B1538] text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                    }`}
+                  >
                     {i < currentStep ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
                   </div>
-                  <span className={`text-xs font-medium hidden sm:inline ${
-                    i === currentStep ? 'text-[#8B1538] dark:text-[#D4828F]' : 'text-gray-400'
-                  }`}>
+                  <span
+                    className={`text-xs font-medium hidden sm:inline ${
+                      i === currentStep ? 'text-[#8B1538] dark:text-[#D4828F]' : 'text-gray-400'
+                    }`}
+                  >
                     {step}
                   </span>
                 </div>
                 {i < steps.length - 1 && (
-                  <div className={`h-px w-8 sm:w-16 mx-1 sm:mx-2 ${
-                    i < currentStep ? 'bg-green-400' : 'bg-gray-200 dark:bg-gray-700'
-                  }`} />
+                  <div
+                    className={`h-px w-8 sm:w-16 mx-1 sm:mx-2 ${
+                      i < currentStep ? 'bg-green-400' : 'bg-gray-200 dark:bg-gray-700'
+                    }`}
+                  />
                 )}
               </div>
             ))}
           </div>
         </div>
 
-        <h1 className="text-2xl sm:text-3xl font-bold dark:text-white mb-4 sm:mb-6">
-          Checkout
-        </h1>
+        <h1 className="text-2xl sm:text-3xl font-bold dark:text-white mb-4 sm:mb-6">Checkout</h1>
 
-        {/* ── Top-level error ── */}
+        {/* Error message */}
         {error && (
           <div className="mb-4 sm:mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 p-3 sm:p-4">
             <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
@@ -323,10 +346,8 @@ export function Checkout() {
 
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px] gap-4 sm:gap-6 lg:gap-8">
-
-            {/* ── LEFT: Shipping + Payment ── */}
+            {/* Left: Shipping + Payment */}
             <div className="space-y-4 sm:space-y-5">
-
               {/* Shipping address */}
               <Card className="p-4 sm:p-6 dark:bg-gray-800 dark:border-gray-700">
                 <div className="flex items-center gap-2.5 mb-4 sm:mb-5">
@@ -339,18 +360,23 @@ export function Checkout() {
                   </div>
                 </div>
 
-                {addresses.length > 0 && (
+                {loadingAddresses ? (
+                  <div className="mb-4 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm text-gray-500">Loading addresses...</span>
+                  </div>
+                ) : addresses.length > 0 ? (
                   <div className="mb-4 flex flex-wrap gap-2">
-                    {addresses.map(a => (
+                    {addresses.map((a) => (
                       <button
                         key={a.id}
                         type="button"
                         onClick={() => setShipping({
-                          recipient_name:  a.recipient_name  ?? '',
-                          recipient_phone: a.recipient_phone ?? '',
-                          street:          a.street,
-                          city:            a.city,
-                          state:           a.state,
+                          recipient_name: a.recipient_name || '',
+                          recipient_phone: a.recipient_phone || '',
+                          street: a.street,
+                          city: a.city,
+                          state: a.state || '',
                         })}
                         className="px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors border-[#8B1538] text-[#8B1538] hover:bg-[#8B1538]/5"
                       >
@@ -358,39 +384,50 @@ export function Checkout() {
                       </button>
                     ))}
                   </div>
-                )}
+                ) : null}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <Field
-                    id="recipient_name" label="Full Name" placeholder="Chidi Ndeko"
+                    id="recipient_name"
+                    label="Full Name"
+                    placeholder="Chidi Ndeko"
                     value={shipping.recipient_name}
-                    onChange={v => setShipping(p => ({ ...p, recipient_name: v }))}
+                    onChange={(v) => setShipping((p) => ({ ...p, recipient_name: v }))}
                     error={fieldErrors.recipient_name}
                   />
                   <Field
-                    id="recipient_phone" label="Phone Number" placeholder="+234 801 234 5678"
-                    type="tel" value={shipping.recipient_phone}
-                    onChange={v => setShipping(p => ({ ...p, recipient_phone: v }))}
+                    id="recipient_phone"
+                    label="Phone Number"
+                    placeholder="+234 801 234 5678"
+                    type="tel"
+                    value={shipping.recipient_phone}
+                    onChange={(v) => setShipping((p) => ({ ...p, recipient_phone: v }))}
                     error={fieldErrors.recipient_phone}
                   />
                   <div className="sm:col-span-2">
                     <Field
-                      id="street" label="Street Address" placeholder="12 Adeola Odeku Street"
+                      id="street"
+                      label="Street Address"
+                      placeholder="12 Adeola Odeku Street"
                       value={shipping.street}
-                      onChange={v => setShipping(p => ({ ...p, street: v }))}
+                      onChange={(v) => setShipping((p) => ({ ...p, street: v }))}
                       error={fieldErrors.street}
                     />
                   </div>
                   <Field
-                    id="city" label="City" placeholder="Lagos"
+                    id="city"
+                    label="City"
+                    placeholder="Lagos"
                     value={shipping.city}
-                    onChange={v => setShipping(p => ({ ...p, city: v }))}
+                    onChange={(v) => setShipping((p) => ({ ...p, city: v }))}
                     error={fieldErrors.city}
                   />
                   <Field
-                    id="state" label="State" placeholder="Lagos"
+                    id="state"
+                    label="State"
+                    placeholder="Lagos"
                     value={shipping.state}
-                    onChange={v => setShipping(p => ({ ...p, state: v }))}
+                    onChange={(v) => setShipping((p) => ({ ...p, state: v }))}
                     error={fieldErrors.state}
                   />
                 </div>
@@ -429,7 +466,6 @@ export function Checkout() {
                   />
                 </div>
 
-                {/* Card notice */}
                 {payment === 'card' && (
                   <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3">
                     <Lock className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
@@ -438,29 +474,18 @@ export function Checkout() {
                     </p>
                   </div>
                 )}
-                {payment === 'bank_transfer' && (
-                  <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3">
-                    <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Bank account details will be provided after placing your order. Payment must be completed within 1 hour.
-                    </p>
-                  </div>
-                )}
               </Card>
             </div>
 
-            {/* ── RIGHT: Order Summary ── */}
+            {/* Right: Order Summary */}
             <div>
-              {/* Mobile: inline; Desktop: sticky */}
               <div className="lg:sticky lg:top-6">
                 <Card className="p-4 sm:p-6 dark:bg-gray-800 dark:border-gray-700">
-                  <h2 className="font-bold text-lg sm:text-xl dark:text-white mb-4">
-                    Order Summary
-                  </h2>
+                  <h2 className="font-bold text-lg sm:text-xl dark:text-white mb-4">Order Summary</h2>
 
                   {/* Items list */}
                   <div className="space-y-3 mb-4 max-h-48 sm:max-h-56 overflow-y-auto pr-1">
-                    {cart.map(item => (
+                    {cart.map((item) => (
                       <div key={item.id} className="flex items-start gap-3">
                         <img
                           src={item.image}
@@ -487,7 +512,10 @@ export function Checkout() {
                       <Input
                         placeholder="e.g. WELCOME10"
                         value={promo}
-                        onChange={e => { setPromo(e.target.value); setPromoApplied(false); }}
+                        onChange={(e) => {
+                          setPromo(e.target.value);
+                          setPromoApplied(false);
+                        }}
                         className="h-10 uppercase text-sm"
                         disabled={promoApplied}
                       />
@@ -566,8 +594,8 @@ export function Checkout() {
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     {[
                       { icon: Shield, text: 'Secure checkout' },
-                      { icon: Lock,   text: 'SSL encrypted' },
-                      { icon: Truck,  text: 'Fast delivery' },
+                      { icon: Lock, text: 'SSL encrypted' },
+                      { icon: Truck, text: 'Fast delivery' },
                       { icon: CheckCircle2, text: 'Easy returns' },
                     ].map(({ icon: Icon, text }) => (
                       <div key={text} className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -579,9 +607,13 @@ export function Checkout() {
 
                   <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3">
                     By placing your order you agree to our{' '}
-                    <Link to="/terms" className="underline hover:text-[#8B1538]">Terms</Link>
+                    <Link to="/help" className="underline hover:text-[#8B1538]">
+                      Terms
+                    </Link>
                     {' & '}
-                    <Link to="/privacy" className="underline hover:text-[#8B1538]">Privacy Policy</Link>
+                    <Link to="/contact" className="underline hover:text-[#8B1538]">
+                      Privacy Policy
+                    </Link>
                   </p>
                 </Card>
               </div>
@@ -592,3 +624,5 @@ export function Checkout() {
     </div>
   );
 }
+
+export default Checkout;

@@ -1,17 +1,45 @@
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './app/App.tsx'
-import './styles/index.css'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { RouterProvider } from 'react-router';
+import { Toaster } from 'sonner';
+import { router } from './app/routes';
+import './index.css';
 
 const rootElement = document.getElementById('root');
 
-
 if (!rootElement) {
-  throw new Error('Root element #root not found in index.html');
+  throw new Error('Root element not found. Check your index.html file.');
 }
 
-createRoot(rootElement).render(
+const root = ReactDOM.createRoot(rootElement);
+
+root.render(
   <React.StrictMode>
-    <App />
+    <RouterProvider router={router} />
+    <Toaster
+      position="top-right"
+      richColors
+      expand
+      closeButton
+      theme="system"
+    />
   </React.StrictMode>
 );
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      if (import.meta.env.DEV) {
+        console.debug('Service worker registration failed:', err);
+      }
+    });
+  });
+}
+
+window.addEventListener('error', (event) => {
+  console.error('Global error:', event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+});

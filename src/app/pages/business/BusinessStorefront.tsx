@@ -10,14 +10,10 @@ import {
   type ApiStore, type ApiStoreLocation, type StoreLocationBody, type UploadContext,
 } from '../../services/api';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const CATEGORIES = [
   'Electronics', 'Fashion', 'Food & Beverages', 'Health & Beauty',
   'Home & Garden', 'Sports', 'Books', 'Automotive', 'Services', 'Other',
 ];
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Location {
   id: string;
@@ -46,8 +42,6 @@ interface StoreForm {
   locations: Location[];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 const makeLocId = () => `loc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
 function makeLocation(isPrimary = false): Location {
@@ -63,12 +57,8 @@ function getInitials(name: string): string {
   return (name || '?').split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
-// ─── Shared Styles ────────────────────────────────────────────────────────────
-
 const inputCls =
   'w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-800 outline-none focus:border-[#8B1538] focus:ring-2 focus:ring-[#8B1538]/10 transition-all placeholder:text-gray-400';
-
-// ─── Category Picker ──────────────────────────────────────────────────────────
 
 interface CategoryPickerProps {
   selected: string[];
@@ -128,8 +118,6 @@ function Field({ label, required, hint, children }: FieldProps) {
   );
 }
 
-// ─── Section Card ─────────────────────────────────────────────────────────────
-
 interface SectionCardProps {
   icon: LucideIcon;
   title: string;
@@ -148,15 +136,11 @@ function SectionCard({ icon: Icon, title, children }: SectionCardProps) {
   );
 }
 
-// ─── Store Header Preview ─────────────────────────────────────────────────────
-
 function StoreHeaderPreview({ form }: { form: StoreForm }) {
   const init = getInitials(form.store_name);
-  const primaryLoc = form.locations.find((l: Location) => l.isPrimary) ?? form.locations[0];
 
   return (
     <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-      {/* Cover */}
       <div
         className="relative h-28 xs:h-32 sm:h-40 flex items-end justify-between px-3 sm:px-5 pb-3"
         style={{
@@ -175,7 +159,6 @@ function StoreHeaderPreview({ form }: { form: StoreForm }) {
         </div>
       </div>
 
-      {/* Avatar + meta */}
       <div className="px-3 sm:px-5 pb-4">
         <div className="flex flex-wrap items-end justify-between gap-2 -mt-6 sm:-mt-7 mb-3">
           <div className="relative flex-shrink-0">
@@ -216,19 +199,11 @@ function StoreHeaderPreview({ form }: { form: StoreForm }) {
               {form.locations.length} Location{form.locations.length !== 1 ? 's' : ''}
             </span>
           )}
-          {primaryLoc?.city && (
-            <span className="flex items-center gap-1 max-w-[120px] truncate">
-              <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5 flex-shrink-0" />
-              <span className="truncate">{primaryLoc.city}</span>
-            </span>
-          )}
         </div>
       </div>
     </div>
   );
 }
-
-// ─── Location Card Header ─────────────────────────────────────────────────────
 
 interface LocationCardHeaderProps {
   loc: Location;
@@ -246,7 +221,6 @@ function LocationCardHeader({ loc, index, totalCount, onDelete, onMakePrimary, o
       className="flex items-start sm:items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 bg-gray-50 cursor-pointer select-none gap-2"
       onClick={onToggle}
     >
-      {/* Left: icon + name + badge */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
         <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${loc.isPrimary ? 'bg-[#8B1538]' : 'bg-gray-200'}`}>
           <Store className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loc.isPrimary ? 'text-white' : 'text-gray-500'}`} />
@@ -265,7 +239,6 @@ function LocationCardHeader({ loc, index, totalCount, onDelete, onMakePrimary, o
         </div>
       </div>
 
-      {/* Right: actions + chevron */}
       <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
         {!loc.isPrimary && (
           <button
@@ -290,8 +263,6 @@ function LocationCardHeader({ loc, index, totalCount, onDelete, onMakePrimary, o
     </div>
   );
 }
-
-// ─── Location Card Full ───────────────────────────────────────────────────────
 
 interface LocationCardFullProps {
   loc: Location;
@@ -351,8 +322,6 @@ function LocationCardFull({ loc, index, totalCount, onUpdate, onDelete, onMakePr
   );
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
-
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="space-y-0 rounded-2xl overflow-hidden">
@@ -396,8 +365,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
     </div>
   );
 }
-
-// ─── Wizard Location Card ─────────────────────────────────────────────────────
 
 interface WizardLocCardProps {
   loc: Location;
@@ -467,8 +434,6 @@ function WizardLocCard({ loc, index, total, onUpdate, onDelete }: WizardLocCardP
   );
 }
 
-// ─── Image Upload Field ───────────────────────────────────────────────────────
-
 const ACCEPTED = 'image/jpeg,image/png,image/webp,image/gif';
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -532,8 +497,6 @@ function ImageUploadField({ label, context, value, onChange, aspect = 'square' }
     </div>
   );
 }
-
-// ─── Create Store Modal ───────────────────────────────────────────────────────
 
 interface CreateStoreModalProps {
   onClose: () => void;
@@ -650,7 +613,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
       <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col"
         style={{ maxHeight: 'calc(100dvh - 24px)' }}
       >
-        {/* Header */}
         <div
           className="px-4 sm:px-6 py-4 sm:py-5 relative flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #3d0a18 0%, #6b1128 60%, #2a0512 100%)' }}
@@ -667,7 +629,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
           </button>
         </div>
 
-        {/* Progress stepper */}
         <div className="px-4 sm:px-6 pt-4 sm:pt-5 flex-shrink-0">
           <div className="flex items-center">
             <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${step >= 1 ? 'bg-[#8B1538] text-white' : 'border-2 border-gray-200 text-gray-400'}`}>
@@ -681,7 +642,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
           </div>
         </div>
 
-        {/* Scrollable body */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 overflow-y-auto flex-1 overscroll-contain">
           {step === 1 ? (
             <div className="space-y-3 sm:space-y-4">
@@ -753,7 +713,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex-shrink-0">
           {submitError && (
             <div className="flex items-center gap-2 text-red-600 text-xs mb-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
@@ -797,8 +756,6 @@ function CreateStoreModal({ onClose, onCreated }: CreateStoreModalProps) {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function apiLocationToLocal(l: ApiStoreLocation): Location {
   return {
     id: l.id,
@@ -835,8 +792,6 @@ function storeToForm(store: ApiStore): StoreForm {
   };
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
 export function BusinessStorefront() {
   const [view, setView] = useState<'loading' | 'empty' | 'form'>('loading');
   const [showModal, setShowModal] = useState(false);
@@ -847,7 +802,6 @@ export function BusinessStorefront() {
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 
-  // ── Shared fetch-and-hydrate logic ─────────────────────────────────────────
   const loadStores = useCallback(async () => {
     const stores = await getMyStores();
     const list = Array.isArray(stores) ? stores : (stores as { data?: ApiStore[] }).data ?? [];
@@ -868,16 +822,12 @@ export function BusinessStorefront() {
     loadStores().catch(() => setView('empty'));
   }, [loadStores]);
 
-  // ── After wizard creates store, re-fetch to get fully-hydrated data ────────
-  // The POST /stores response doesn't include joined locations/category, so we
-  // call getMyStores() again to guarantee the form reflects what's on the backend.
   const handleStoreCreated = useCallback(async (_store: ApiStore) => {
     setShowModal(false);
     setView('loading');
     try {
       await loadStores();
     } catch {
-      // Fallback: use the bare create response so at least something renders
       const f = storeToForm(_store);
       setStoreId(_store.id);
       setForm(f);
@@ -939,7 +889,6 @@ export function BusinessStorefront() {
     setSaving(true);
     setSaveState('idle');
     try {
-      // Save store-level fields
       await updateStore(storeId, {
         store_name: form.store_name,
         store_tagline: form.tagline || undefined,
@@ -951,7 +900,6 @@ export function BusinessStorefront() {
         banner_url: form.cover_image || undefined,
       });
 
-      // Update existing locations (real API UUIDs — not prefixed with 'loc_')
       await Promise.all(
         form.locations
           .filter(loc => !loc.id.startsWith('loc_'))
@@ -970,7 +918,6 @@ export function BusinessStorefront() {
           )
       );
 
-      // Create newly added locations (local ids start with 'loc_')
       await Promise.all(
         form.locations
           .filter(loc => loc.id.startsWith('loc_'))
@@ -1029,7 +976,6 @@ export function BusinessStorefront() {
 
             <StoreHeaderPreview form={form} />
 
-            {/* New store banner */}
             <div className="bg-white border border-dashed border-gray-300 rounded-xl px-3 sm:px-4 py-3 flex flex-col xs:flex-row xs:items-center justify-between gap-3">
               <div className="flex items-start xs:items-center gap-2 sm:gap-3">
                 <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#8B1538]/10 flex items-center justify-center flex-shrink-0 mt-0.5 xs:mt-0">
@@ -1049,7 +995,6 @@ export function BusinessStorefront() {
               </button>
             </div>
 
-            {/* Store Information */}
             <SectionCard icon={Store} title="Store Information">
               <div className="space-y-3 sm:space-y-4">
                 <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4">
@@ -1094,7 +1039,6 @@ export function BusinessStorefront() {
               </div>
             </SectionCard>
 
-            {/* Store Locations */}
             <SectionCard icon={MapPin} title={`Store Locations${form.locations.length > 0 ? ` (${form.locations.length})` : ''}`}>
               <div className="flex flex-col xs:flex-row xs:items-center justify-between gap-2 mb-3 sm:mb-4 -mt-1">
                 <p className="text-xs text-gray-400 leading-relaxed">Add all your physical branches — each with its own contact details.</p>
@@ -1124,7 +1068,6 @@ export function BusinessStorefront() {
               )}
             </SectionCard>
 
-            {/* Store Policies */}
             <SectionCard icon={BarChart2} title="Store Policies">
               <div className="space-y-3 sm:space-y-4">
                 <Field label="Return Policy">
@@ -1136,7 +1079,6 @@ export function BusinessStorefront() {
               </div>
             </SectionCard>
 
-            {/* Store Media */}
             <SectionCard icon={Camera} title="Store Media">
               <div className="flex gap-4">
                 <ImageUploadField
@@ -1174,7 +1116,6 @@ export function BusinessStorefront() {
               )}
             </SectionCard>
 
-            {/* Footer */}
             <div className="flex flex-col-reverse xs:flex-row xs:items-center justify-between gap-3 border-t border-gray-100 pt-3 sm:pt-4 pb-4 sm:pb-6">
               <button
                 onClick={() => setView('empty')}
