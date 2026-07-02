@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { Toaster } from 'sonner';
 import { router } from './app/routes';
-import './index.css';
+import './styles/index.css';
 
 const rootElement = document.getElementById('root');
 
