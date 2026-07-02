@@ -26,20 +26,26 @@ function errMsg(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback;
 }
 
+// ── Map Account notification keys to API keys ──
+const NOTIFICATION_KEY_MAP: Record<string, keyof NotificationPreferences> = {
+  order_updates: 'order_updates',
+  promotions: 'promotions',
+  news_and_tips: 'news_and_tips',
+  account_activity: 'account_activity',
+};
+
 const DEFAULT_NOTIF_PREFS: NotificationPreferences = {
   order_updates: true,
-  deals: true,
-  wishlist: false,
-  newsletter: false,
-  sms: true,
+  promotions: true,
+  news_and_tips: false,
+  account_activity: true,
 };
 
 const NOTIFICATION_META: { id: keyof NotificationPreferences; label: string; desc: string }[] = [
   { id: 'order_updates', label: 'Order Updates', desc: 'Shipping and delivery notifications' },
-  { id: 'deals', label: 'Flash Deals & Offers', desc: 'Exclusive discounts and cashback alerts' },
-  { id: 'wishlist', label: 'Wishlist Restocks', desc: 'When wishlisted items are back in stock' },
-  { id: 'newsletter', label: 'Newsletter', desc: 'Weekly top picks and curated deals' },
-  { id: 'sms', label: 'SMS Notifications', desc: 'Text alerts for important updates' },
+  { id: 'promotions', label: 'Promotions', desc: 'Exclusive discounts and cashback alerts' },
+  { id: 'news_and_tips', label: 'News & Tips', desc: 'Weekly top picks and curated deals' },
+  { id: 'account_activity', label: 'Account Activity', desc: 'Text alerts for important updates' },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,8 +60,6 @@ const tabs = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
-
-
 
 function getStatusColor(status: string) {
   switch (status) {
@@ -143,7 +147,6 @@ function Spinner({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   const cls = size === 'sm' ? 'h-4 w-4' : 'h-8 w-8';
   return <Loader2 className={`${cls} animate-spin text-[#8B1538]`} />;
 }
-
 
 // ─── Tab panels ───────────────────────────────────────────────────────────────
 
@@ -341,7 +344,7 @@ function OrdersTab() {
 // ─── Tab: Addresses ─────────────────────────────────────────────────────────────
 
 const EMPTY_ADDRESS_FORM: AddressBody = {
-  label: '', recipient_name: '', recipient_phone: '', street: '', city: '', state: '', country: 'Nigeria', is_default: false,
+  label: '', recipient_name: '', recipient_phone: '', street: '', city: '', state: '', country: 'Nigeria',
 };
 
 function AddressFormModal({
@@ -355,7 +358,15 @@ function AddressFormModal({
 }) {
   const [form, setForm] = useState<AddressBody>(
     initial
-      ? { label: initial.label, recipient_name: initial.recipient_name ?? '', recipient_phone: initial.recipient_phone ?? '', street: initial.street, city: initial.city, state: initial.state, country: initial.country ?? 'Nigeria', is_default: initial.is_default }
+      ? { 
+          label: initial.label, 
+          recipient_name: initial.recipient_name ?? '', 
+          recipient_phone: initial.recipient_phone ?? '', 
+          street: initial.street, 
+          city: initial.city, 
+          state: initial.state, 
+          country: initial.country ?? 'Nigeria'
+        }
       : EMPTY_ADDRESS_FORM
   );
   const [saving, setSaving] = useState(false);
@@ -428,15 +439,6 @@ function AddressFormModal({
             <Label className="text-xs">Country</Label>
             <Input value={form.country ?? ''} onChange={(e) => setForm({ ...form, country: e.target.value })} className="dark:bg-gray-800 dark:border-gray-700" />
           </div>
-          <label className="flex items-center gap-2 text-sm dark:text-gray-300 pt-1">
-            <input
-              type="checkbox"
-              checked={form.is_default}
-              onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
-              className="rounded"
-            />
-            Set as default address
-          </label>
 
           <Button type="submit" disabled={saving} className="w-full bg-[#8B1538] hover:bg-[#6B0F2A] mt-2">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : initial ? 'Save Changes' : 'Add Address'}
@@ -473,10 +475,10 @@ function AddressesTab() {
 
   const handleSave = async (body: AddressBody) => {
     if (editing) {
-      const updated = await updateAddress(editing.id, body);
+      const updated = await updateAddress(editing.id, { ...body, is_default: editing.is_default });
       setAddresses((prev) => prev.map((a) => (a.id === editing.id ? updated : a)));
     } else {
-      const created = await addAddress(body);
+      const created = await addAddress({ ...body, is_default: false });
       setAddresses((prev) => [...prev, created]);
     }
   };
@@ -649,8 +651,14 @@ function PaymentMethodsTab() {
     setRedirecting(true);
     setError('');
     try {
-      const { authorization_url } = await initiateAddPaymentMethod();
-      window.location.href = authorization_url;
+      const result = await initiateAddPaymentMethod('card');
+      const authUrl = (result as any)?.authorization_url;
+      if (authUrl) {
+        window.location.href = authUrl;
+      } else {
+        setError('No authorization URL received. Please try again.');
+        setRedirecting(false);
+      }
     } catch (e) {
       setError(errMsg(e, 'Could not start card setup. Please try again.'));
       setRedirecting(false);
@@ -691,7 +699,7 @@ function PaymentMethodsTab() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="font-semibold dark:text-white text-sm truncate capitalize">
-                    {card.card_type} •••• {card.last_four}
+                    {card.brand ?? card.type} •••• {card.last_four}
                   </p>
                   {card.is_default && (
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#8B1538]/10 text-[#8B1538] dark:bg-[#8B1538]/20 flex-shrink-0">
@@ -700,7 +708,8 @@ function PaymentMethodsTab() {
                   )}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Expires {card.expiry} · {card.cardholder_name}
+                  {card.exp_month && card.exp_year ? `Expires ${card.exp_month}/${card.exp_year}` : 'Card details'}
+                  {card.account_number ? ` · ${card.account_number}` : ''}
                 </p>
               </div>
             </div>
@@ -762,8 +771,6 @@ function NotificationsTab() {
       const res = await getNotificationPreferences();
       setPrefs(res);
     } catch (e) {
-      // If the endpoint isn't there yet / user has none saved, fall back to defaults
-      // rather than blocking the whole tab.
       setPrefs(DEFAULT_NOTIF_PREFS);
       setError(errMsg(e, 'Could not load saved preferences — showing defaults.'));
     } finally {
@@ -878,10 +885,7 @@ function SettingsTab({ onAccountDeleted, onPasswordChanged }: { onAccountDeleted
 
     setPwSaving(true);
     try {
-      await changePassword({
-        current_password: passwordForm.current,
-        new_password: passwordForm.newPass,
-      });
+      await changePassword(passwordForm.current, passwordForm.newPass);
       tokenStore.clear();
       toast.success('Password updated. Please log in again.');
       setTimeout(onPasswordChanged, 1500);
@@ -1024,7 +1028,7 @@ export function Account() {
 
   const handleTabChange = (id: string) => {
     setActive(id);
-    setSidebarOpen(false); // close mobile drawer
+    setSidebarOpen(false);
   };
 
   const activeTab = tabs.find((t) => t.id === active);

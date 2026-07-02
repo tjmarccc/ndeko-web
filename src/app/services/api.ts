@@ -180,8 +180,11 @@ export interface RegisterBody {
 export interface ApiStore {
   id: string;
   store_name: string;
+  store_slug: string;
   store_tagline?: string;
   description?: string;
+  status?: 'active' | 'pending' | 'suspended';
+  average_rating?: number;
   city?: string;
   state?: string;
   area?: string;
@@ -715,6 +718,7 @@ export const fetchProducts = async (params?: {
   limit?: number;
   search?: string;
   category?: string;
+  store_id?: string;
   min_price?: number;
   max_price?: number;
 }): Promise<PaginatedResponse<ApiProduct>> => {
@@ -1074,6 +1078,39 @@ export const updateOrderStatus = async (orderId: string, status: string): Promis
       `/api/v1/orders/${orderId}/status`,
       { status }
     );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Public Store Endpoints ────────────────────────────────────────────────────
+/**
+ * Fetch a public, buyer-facing list of stores (e.g. for the Vendor Marketplace
+ * page). Unlike getMyStores(), this is not scoped to the authenticated
+ * seller and does not require auth.
+ */
+export const fetchPublicStores = async (params?: {
+  status?: 'active' | 'pending' | 'suspended';
+  category?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<PaginatedResponse<ApiStore>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiStore>>(
+      '/api/v1/stores',
+      { params }
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const fetchPublicStoreBySlug = async (slug: string): Promise<ApiStore> => {
+  try {
+    const response = await apiClient.get<{ data: ApiStore }>(`/api/v1/stores/${slug}`);
     return response.data.data;
   } catch (error) {
     handleError(error);

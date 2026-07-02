@@ -112,7 +112,7 @@ export function Products() {
           page,
           limit: PAGE_SIZE,
         };
-        if (selectedCategory !== 'all') params.category_slug = selectedCategory;
+        if (selectedCategory !== 'all') params.category = selectedCategory;
         if (debouncedPrice[0] > 0) params.min_price = debouncedPrice[0];
         if (debouncedPrice[1] < MAX_PRICE) params.max_price = debouncedPrice[1];
 
