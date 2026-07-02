@@ -390,5 +390,5 @@ export function BusinessLayout({ children }: BusinessLayoutProps = {}) {
         </main>
       </div>
     </div>
-  );
+  )
 }
