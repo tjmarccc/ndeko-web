@@ -16,7 +16,7 @@ export enum UserRole {
 }
 
 // ── Token Management ──────────────────────────────────────────────────────────
-let _accessToken: string | null = localStorage.getItem('ndeko_token');
+let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
 let _refreshToken: string | null = localStorage.getItem('ndeko_refresh_token');
 let _user: AuthUser | null = null;
 
@@ -31,7 +31,7 @@ export const tokenStore = {
   getAccess: () => _accessToken,
   setAccess: (t: string) => {
     _accessToken = t;
-    localStorage.setItem('ndeko_token', t);
+    localStorage.setItem('ndeko_access_token', t);
   },
   getRefresh: () => _refreshToken,
   setRefresh: (t: string) => {
@@ -47,7 +47,7 @@ export const tokenStore = {
     _accessToken = null;
     _refreshToken = null;
     _user = null;
-    localStorage.removeItem('ndeko_token');
+    localStorage.removeItem('ndeko_access_token');
     localStorage.removeItem('ndeko_refresh_token');
     localStorage.removeItem('ndeko_user');
   },
