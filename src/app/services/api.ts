@@ -793,6 +793,19 @@ export const fetchStoreProductStats = async (storeId: string): Promise<StoreProd
   }
 };
 
+/**
+ * Get the user's primary business/store.
+ * Returns the first store if multiple exist, or null if none found.
+ */
+export const getMyBusiness = async (): Promise<ApiStore | null> => {
+  try {
+    const stores = await getMyStores();
+    return stores && stores.length > 0 ? stores[0] : null;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
 export const getMyStores = async (): Promise<ApiStore[]> => {
   try {
     const response = await apiClient.get<{ data: ApiStore[] }>('/api/v1/stores/my');
