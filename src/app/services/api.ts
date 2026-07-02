@@ -6,7 +6,7 @@ const REQUEST_TIMEOUT_MS = 15000;
 export type UploadContext = 'product' | 'store-logo' | 'store-banner' | 'profile-avatar';
 
 // ── Session Expiry Event ──────────────────────────────────────────────────────
-export const SESSION_EXPIRED_EVENT = 'session_expired';
+// export const SESSION_EXPIRED_EVENT = 'session_expired';
 
 // ── User Role Enum ────────────────────────────────────────────────────────────
 export enum UserRole {
@@ -15,43 +15,78 @@ export enum UserRole {
   ADMIN = 'admin',
 }
 
-// ── Token Management ──────────────────────────────────────────────────────────
-let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
-let _refreshToken: string | null = localStorage.getItem('ndeko_refresh_token');
-let _user: AuthUser | null = null;
+// // ── Token Management ──────────────────────────────────────────────────────────
+// let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
+// let _refreshToken: string | null = localStorage.getItem('ndeko_refresh_token');
+// let _user: AuthUser | null = null;
 
-try {
-  const stored = localStorage.getItem('ndeko_user');
-  _user = stored ? JSON.parse(stored) : null;
-} catch {
-  _user = null;
-}
+// try {
+//   const stored = localStorage.getItem('ndeko_user');
+//   _user = stored ? JSON.parse(stored) : null;
+// } catch {
+//   _user = null;
+// }
+
+// export const tokenStore = {
+//   getAccess: () => _accessToken,
+//   setAccess: (t: string) => {
+//     _accessToken = t;
+//     localStorage.setItem('ndeko_access_token', t);
+//   },
+//   getRefresh: () => _refreshToken,
+//   setRefresh: (t: string) => {
+//     _refreshToken = t;
+//     localStorage.setItem('ndeko_refresh_token', t);
+//   },
+//   getUser: () => _user,
+//   setUser: (u: AuthUser) => {
+//     _user = u;
+//     localStorage.setItem('ndeko_user', JSON.stringify(u));
+//   },
+//   clear: () => {
+//     _accessToken = null;
+//     _refreshToken = null;
+//     _user = null;
+//     localStorage.removeItem('ndeko_access_token');
+//     localStorage.removeItem('ndeko_refresh_token');
+//     localStorage.removeItem('ndeko_user');
+//   },
+// };
+
+
+let _accessToken: string | null = localStorage.getItem('ndeko_access_token');
 
 export const tokenStore = {
   getAccess: () => _accessToken,
-  setAccess: (t: string) => {
-    _accessToken = t;
-    localStorage.setItem('ndeko_access_token', t);
+  setAccess: (t: string) => { _accessToken = t; localStorage.setItem('ndeko_access_token', t); },
+
+  getRefresh: () => localStorage.getItem('ndeko_refresh_token'),
+  setRefresh: (t: string) => localStorage.setItem('ndeko_refresh_token', t),
+
+  getUser: (): AuthUser | null => {
+    try {
+      const raw = localStorage.getItem('ndeko_user');
+      return raw ? (JSON.parse(raw) as AuthUser) : null;
+    } catch {
+      return null;
+    }
   },
-  getRefresh: () => _refreshToken,
-  setRefresh: (t: string) => {
-    _refreshToken = t;
-    localStorage.setItem('ndeko_refresh_token', t);
-  },
-  getUser: () => _user,
-  setUser: (u: AuthUser) => {
-    _user = u;
-    localStorage.setItem('ndeko_user', JSON.stringify(u));
-  },
+  setUser: (u: AuthUser) => localStorage.setItem('ndeko_user', JSON.stringify(u)),
+
   clear: () => {
     _accessToken = null;
-    _refreshToken = null;
-    _user = null;
     localStorage.removeItem('ndeko_access_token');
     localStorage.removeItem('ndeko_refresh_token');
     localStorage.removeItem('ndeko_user');
   },
 };
+
+export const SESSION_EXPIRED_EVENT = 'ndeko:session_expired';
+function dispatchSessionExpired() {
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+}
+
+
 
 // ── API Error Class ──────────────────────────────────────────────────────────
 export class ApiError extends Error {
