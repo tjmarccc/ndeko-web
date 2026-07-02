@@ -935,7 +935,7 @@ export const getStoreOrders = async (storeId: string, page = 1, limit = 20): Pro
   }
 };
 
-export const getStoreInventory = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiProduct>> => {
+export const getStoreProducts  = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiProduct>> => {
   try {
     const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
       `/api/v1/stores/${storeId}/products`,
