@@ -228,21 +228,21 @@ function deriveNotifications(
     }
   }
 
-  // Reviews → new ratings
-  for (const r of reviews) {
-    const stars = '⭐'.repeat(r.rating);
-    notifs.push({
-      id: makeId('review', r.id),
-      type: 'review',
-      title: `${r.rating}-Star Review from ${r.reviewer.first_name} ${r.reviewer.last_name}`,
-      message: r.comment
-        ? `${r.reviewer.first_name} ${r.reviewer.last_name} left a ${stars} review: "${r.comment}"`
-        : `${r.reviewer.first_name} ${r.reviewer.last_name} gave your store ${r.rating} star${r.rating !== 1 ? 's' : ''}.`,
-      time: r.created_at,
-      timeLabel: relativeTime(r.created_at),
-      read: true,
-    });
-  }
+  // // Reviews → new ratings
+  // for (const r of reviews) {
+  //   const stars = '⭐'.repeat(r.rating);
+  //   notifs.push({
+  //     id: makeId('review', r.id),
+  //     type: 'review',
+  //     title: `${r.rating}-Star Review from ${r.reviewer.first_name} ${r.reviewer.last_name}`,
+  //     message: r.comment
+  //       ? `${r.reviewer.first_name} ${r.reviewer.last_name} left a ${stars} review: "${r.comment}"`
+  //       : `${r.reviewer.first_name} ${r.reviewer.last_name} gave your store ${r.rating} star${r.rating !== 1 ? 's' : ''}.`,
+  //     time: r.created_at,
+  //     timeLabel: relativeTime(r.created_at),
+  //     read: true,
+  //   });
+  // }
 
   // Wallet → payouts / credits
   for (const tx of wallet) {

@@ -1114,6 +1114,55 @@ export const updateOrderStatus = async (orderId: string, status: string): Promis
   }
 };
 
+export const fetchStoreReviews = async (
+  storeId: string,
+  page = 1,
+  limit = 20
+): Promise<PaginatedResponse<ApiReview>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<ApiReview>>(
+      `/api/v1/stores/${storeId}/reviews`,
+      {
+        params: { page, limit },
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export interface WalletTransaction {
+  id: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  description: string;
+  status?: 'pending' | 'completed' | 'failed';
+  created_at: string;
+}
+
+export const getWalletTransactions = async (
+  page = 1,
+  limit = 20
+): Promise<PaginatedResponse<WalletTransaction>> => {
+  try {
+    const response = await apiClient.get<PaginatedResponse<WalletTransaction>>(
+      '/api/v1/users/me/wallet/transactions',
+      {
+        params: { page, limit },
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+}; 
+
+
+
+
 // ── Public Store Endpoints ────────────────────────────────────────────────────
 /**
  * Fetch a public, buyer-facing list of stores (e.g. for the Vendor Marketplace
