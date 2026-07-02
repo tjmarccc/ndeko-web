@@ -231,6 +231,35 @@ export interface StoreProductStats {
   active_products: number;
 }
 
+export interface WishlistItem {
+  id: string;
+  product_id: string;
+  product: ApiProduct;
+  created_at: string;
+}
+
+export interface ApiReview {
+  id: string;
+  product_id: string;
+  rating: number;
+  comment?: string;
+  reviewer?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    avatar_url?: string;
+  };
+  is_verified_purchase: boolean;
+  created_at: string;
+}
+
+export interface ReviewSummary {
+  avg_rating: number;
+  total_reviews: number;
+  verified_count?: number;
+  breakdown?: Record<string, number>;
+}
+
 export type Product = ApiProduct;
 
 // ── Axios Instance ───────────────────────────────────────────────────────────
@@ -631,13 +660,6 @@ export const cancelOrder = async (orderId: string): Promise<ApiOrder> => {
 };
 
 // ── Wishlist Endpoints ────────────────────────────────────────────────────────
-export interface WishlistItem {
-  id: string;
-  product_id: string;
-  product: ApiProduct;
-  created_at: string;
-}
-
 export const getWishlist = async (page = 1, limit = 20): Promise<PaginatedResponse<WishlistItem>> => {
   try {
     const response = await apiClient.get<PaginatedResponse<WishlistItem>>(
@@ -669,13 +691,26 @@ export const removeFromWishlist = async (productId: string): Promise<any> => {
 };
 
 // ── Reviews Endpoints ─────────────────────────────────────────────────────────
-export const getProductReviews = async (productId: string, page = 1, limit = 10): Promise<PaginatedResponse<any>> => {
+export const getProductReviews = async (productId: string, page = 1, limit = 10): Promise<PaginatedResponse<ApiReview>> => {
   try {
-    const response = await apiClient.get<PaginatedResponse<any>>(
+    const response = await apiClient.get<PaginatedResponse<ApiReview>>(
       `/api/v1/reviews/products/${productId}`,
       { params: { page, limit } }
     );
     return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const fetchProductReviews = getProductReviews;
+
+export const fetchProductReviewSummary = async (productId: string): Promise<ReviewSummary> => {
+  try {
+    const response = await apiClient.get<{ data: ReviewSummary }>(
+      `/api/v1/reviews/products/${productId}/summary`
+    );
+    return response.data.data;
   } catch (error) {
     handleError(error);
   }
