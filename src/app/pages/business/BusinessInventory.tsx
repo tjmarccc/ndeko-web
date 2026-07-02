@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Search, Plus, Edit, Trash2, AlertTriangle, Package,
   DollarSign, Filter, RefreshCw, X, ChevronLeft,
   ChevronRight, Loader2, CheckCircle, XCircle, Camera,
+  Layers, Store, Check, ChevronDown, MapPin,
 } from 'lucide-react';
 import {
   ApiError,
@@ -19,6 +20,14 @@ import {
   type ApiCategory,
   type StoreProductStats,
 } from '../../services/api';
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+type StoreWithLocation = ApiStore & { city?: string; address?: string; area?: string };
+
+type ApiProductWithStore = ApiProduct & { _storeId?: string; _storeName?: string };
+
+const ALL_STORES_ID = 'all';
+const ALL_STORES_FETCH_LIMIT = 500;
 
 // ─── Product Image Uploader ───────────────────────────────────────────────────
 
@@ -90,6 +99,141 @@ function ProductImageUploader({ images, onChange }: { images: string[]; onChange
   );
 }
 
+// ─── Location / Store Dropdown ────────────────────────────────────────────────
+
+interface LocationOption {
+  id: string;
+  name: string;
+  subtitle?: string;
+  isAll?: boolean;
+}
+
+function LocationDropdown({
+  stores,
+  value,
+  onChange,
+  includeAll = false,
+  allLabel = 'All Stores · Combined',
+  label = 'Select Store',
+  placeholder = 'Select a location…',
+  variant = 'page',
+  error,
+}: {
+  stores: ApiStore[];
+  value: string;
+  onChange: (id: string) => void;
+  includeAll?: boolean;
+  allLabel?: string;
+  label?: string;
+  placeholder?: string;
+  variant?: 'page' | 'field';
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => searchRef.current?.focus(), 30);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  const getSubtitle = (s: StoreWithLocation) => s.area || s.city || s.address || '';
+
+  const options: LocationOption[] = [
+    ...(includeAll
+      ? [{
+          id: ALL_STORES_ID,
+          name: allLabel,
+          subtitle: `${stores.length} location${stores.length === 1 ? '' : 's'} aggregated`,
+          isAll: true,
+        }]
+      : []),
+    ...stores.map(s => ({ id: s.id, name: s.store_name, subtitle: getSubtitle(s as StoreWithLocation) })),
+  ];
+
+  const filtered = query.trim()
+    ? options.filter(o =>
+        o.name.toLowerCase().includes(query.toLowerCase()) ||
+        (o.subtitle ?? '').toLowerCase().includes(query.toLowerCase())
+      )
+    : options;
+
+  const selected = options.find(o => o.id === value);
+
+  return (
+    <div className={`loc-dropdown loc-dropdown--${variant}${open ? ' loc-dropdown--open' : ''}`} ref={rootRef}>
+      <button
+        type="button"
+        className={`loc-dropdown__trigger${error ? ' loc-dropdown__trigger--error' : ''}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="loc-dropdown__trigger-icon">
+          {selected?.isAll ? <Layers style={{ width: 16, height: 16 }} /> : <Store style={{ width: 16, height: 16 }} />}
+        </span>
+        <span className="loc-dropdown__trigger-text">
+          {variant === 'page' && <span className="loc-dropdown__trigger-label">{label.toUpperCase()}</span>}
+          <span className="loc-dropdown__trigger-name">{selected ? selected.name : placeholder}</span>
+          {selected?.subtitle && <span className="loc-dropdown__trigger-sub">{selected.subtitle}</span>}
+        </span>
+        <ChevronDown style={{ width: 15, height: 15, flexShrink: 0 }} className="loc-dropdown__chevron" />
+      </button>
+
+      {open && (
+        <div className="loc-dropdown__panel">
+          <div className="loc-dropdown__search">
+            <Search style={{ width: 14, height: 14 }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search locations…"
+            />
+          </div>
+          <div className="loc-dropdown__list">
+            {filtered.length === 0 && <div className="loc-dropdown__empty">No matching locations</div>}
+            {filtered.map(o => (
+              <button
+                key={o.id}
+                type="button"
+                className={`loc-dropdown__option${o.id === value ? ' loc-dropdown__option--active' : ''}`}
+                onClick={() => { onChange(o.id); setOpen(false); setQuery(''); }}
+              >
+                <span className="loc-dropdown__option-icon">
+                  {o.isAll ? <Layers style={{ width: 15, height: 15 }} /> : <Store style={{ width: 15, height: 15 }} />}
+                </span>
+                <span className="loc-dropdown__option-text">
+                  <span className="loc-dropdown__option-name">{o.name}</span>
+                  {o.subtitle && (
+                    <span className="loc-dropdown__option-sub">
+                      {!o.isAll && <MapPin style={{ width: 10, height: 10 }} />} {o.subtitle}
+                    </span>
+                  )}
+                </span>
+                {o.id === value && <Check style={{ width: 15, height: 15 }} className="loc-dropdown__check" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StockBadge({ status, qty }: { status: string; qty: number }) {
@@ -103,6 +247,16 @@ function StockBadge({ status, qty }: { status: string; qty: number }) {
       </span>
     );
   return <span className="inv-badge inv-badge--ok">{safeQty} in stock</span>;
+}
+
+function LocationTag({ name }: { name?: string }) {
+  if (!name) return <span style={{ color: '#9ca3af' }}>—</span>;
+  return (
+    <span className="loc-tag">
+      <Store style={{ width: 10, height: 10 }} />
+      {name}
+    </span>
+  );
 }
 
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
@@ -120,18 +274,23 @@ interface ProductFormData {
   name: string; description: string; price: string;
   discount_price: string; cost_price: string; stock_quantity: string;
   category_id: string; images: string[]; is_active: boolean;
+  location_id: string;
 }
 
 function ProductModal({
-  mode, product, storeId, categories, onClose, onSaved,
+  mode, product, stores, defaultStoreId, categories, onClose, onSaved,
 }: {
   mode: 'add' | 'edit';
-  product?: ApiProduct;
-  storeId: string;
+  product?: ApiProductWithStore;
+  stores: ApiStore[];
+  defaultStoreId?: string;
   categories: ApiCategory[];
   onClose: () => void;
-  onSaved: (p: ApiProduct) => void;
+  onSaved: (p: ApiProductWithStore) => void;
 }) {
+  const initialLocationId =
+    product?._storeId ?? (defaultStoreId && defaultStoreId !== ALL_STORES_ID ? defaultStoreId : '');
+
   const [form, setForm] = useState<ProductFormData>({
     name: product?.name ?? '',
     description: product?.description ?? '',
@@ -142,6 +301,7 @@ function ProductModal({
     category_id: product?.category?.id ?? (categories[0]?.id ?? ''),
     images: product?.images ?? [],
     is_active: product?.is_active ?? true,
+    location_id: initialLocationId,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -150,6 +310,10 @@ function ProductModal({
     setForm(f => ({ ...f, [k]: e.target.value }));
 
   const handleSubmit = async () => {
+    if (!form.location_id) {
+      setError('Please choose which store location this product belongs to.');
+      return;
+    }
     if (!form.name.trim() || !form.price || !form.stock_quantity) {
       setError('Name, price and stock are required.');
       return;
@@ -169,9 +333,11 @@ function ProductModal({
         is_active: form.is_active,
       };
       const saved = mode === 'add'
-        ? await createProduct(storeId, body)
-        : await updateProduct(storeId, product!.id, body);
-      onSaved(saved);
+        ? await createProduct(form.location_id, body)
+        : await updateProduct(form.location_id, product!.id, body);
+
+      const storeMeta = stores.find(s => s.id === form.location_id);
+      onSaved({ ...saved, _storeId: form.location_id, _storeName: storeMeta?.store_name });
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong.');
     } finally {
@@ -192,6 +358,19 @@ function ProductModal({
 
           <div className="inv-form-grid">
             <div className="inv-field inv-field--full">
+              <label>Store Location *</label>
+              <LocationDropdown
+                stores={stores}
+                value={form.location_id}
+                onChange={id => setForm(f => ({ ...f, location_id: id }))}
+                includeAll={false}
+                variant="field"
+                placeholder="Search and select a store…"
+                error={!form.location_id && !!error}
+              />
+            </div>
+
+            <div className="inv-field inv-field--full">
               <label>Product Name *</label>
               <input value={form.name} onChange={set('name')} placeholder="e.g. iPhone 15 Pro" />
             </div>
@@ -203,27 +382,28 @@ function ProductModal({
 
             <div className="inv-field">
               <label>Selling Price (₦) *</label>
-              <input type="number" value={form.price} onChange={set('price')} placeholder="0.00" min="0" />
+              <input type="number" value={form.price} onChange={set('price')} placeholder="0.00" min="0" step="0.01" />
             </div>
 
             <div className="inv-field">
               <label>Discount Price (₦)</label>
-              <input type="number" value={form.discount_price} onChange={set('discount_price')} placeholder="0.00" min="0" />
+              <input type="number" value={form.discount_price} onChange={set('discount_price')} placeholder="0.00" min="0" step="0.01" />
             </div>
 
             <div className="inv-field">
               <label>Cost Price (₦) <span style={{ color: '#9ca3af', fontWeight: 400 }}>— private</span></label>
-              <input type="number" value={form.cost_price} onChange={set('cost_price')} placeholder="0.00" min="0" />
+              <input type="number" value={form.cost_price} onChange={set('cost_price')} placeholder="0.00" min="0" step="0.01" />
             </div>
 
             <div className="inv-field">
               <label>Stock Quantity *</label>
-              <input type="number" value={form.stock_quantity} onChange={set('stock_quantity')} placeholder="0" min="0" />
+              <input type="number" value={form.stock_quantity} onChange={set('stock_quantity')} placeholder="0" min="0" step="1" />
             </div>
 
             <div className="inv-field">
               <label>Category</label>
               <select value={form.category_id} onChange={set('category_id')}>
+                <option value="">No Category</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
@@ -250,9 +430,6 @@ function ProductModal({
 }
 
 // ─── Pagination helper ────────────────────────────────────────────────────────
-// Produces a compact page-number array with ellipsis gaps, e.g.:
-//   [1, '…', 4, 5, 6, '…', 20]
-// Always shows first + last page; shows current ±1; collapses the rest.
 
 function getPageNumbers(current: number, total: number): (number | '…')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -271,7 +448,8 @@ function getPageNumbers(current: number, total: number): (number | '…')[] {
 export function BusinessInventory() {
   const [storeId, setStoreId] = useState<string | null>(null);
   const [stores, setStores] = useState<ApiStore[]>([]);
-  const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [products, setProducts] = useState<ApiProductWithStore[]>([]);
+  const [allProducts, setAllProducts] = useState<ApiProductWithStore[]>([]);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -285,9 +463,11 @@ export function BusinessInventory() {
 
   const [stats, setStats] = useState<StoreProductStats | null>(null);
 
-  const [modal, setModal] = useState<{ mode: 'add' | 'edit'; product?: ApiProduct } | null>(null);
+  const [modal, setModal] = useState<{ mode: 'add' | 'edit'; product?: ApiProductWithStore } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const isAllStores = storeId === ALL_STORES_ID;
 
   const showToast = (message: string, type: 'success' | 'error') => setToast({ message, type });
 
@@ -302,9 +482,10 @@ export function BusinessInventory() {
         const storeList = Array.isArray(storesRes) ? storesRes : (storesRes as { data?: ApiStore[] }).data ?? [];
         setStores(storeList);
         setCategories(catsRes.data ?? []);
-        const first = storeList[0]?.id;
-        if (first) {
-          setStoreId(first);
+        if (storeList.length > 1) {
+          setStoreId(ALL_STORES_ID);
+        } else if (storeList.length === 1) {
+          setStoreId(storeList[0].id);
         } else {
           setLoading(false);
           setLoadError('No stores found. Create a store to manage inventory.');
@@ -316,38 +497,69 @@ export function BusinessInventory() {
     })();
   }, []);
 
-  // Fetch server-side stats whenever the active store changes
+  // Fetch server-side stats for single store
   useEffect(() => {
-    if (!storeId) return;
+    if (!storeId || isAllStores) { setStats(null); return; }
     fetchStoreProductStats(storeId).then(setStats).catch(() => setStats(null));
-  }, [storeId]);
+  }, [storeId, isAllStores]);
 
-  // Load products when storeId / page changes
+  // Load products
   const loadProducts = useCallback(async () => {
-    if (!storeId) return;
+    if (!storeId || stores.length === 0) return;
     setLoading(true);
     setLoadError('');
     try {
-      const res = await getStoreProducts(storeId, page, LIMIT);
-      setProducts(res.data ?? []);
-      setTotal(res.total ?? 0);
+      if (storeId === ALL_STORES_ID) {
+        // Load all products from all stores with inventory tracking
+        const results = await Promise.all(
+          stores.map(async s => {
+            const res = await getStoreProducts(s.id, 1, ALL_STORES_FETCH_LIMIT);
+            return (res.data ?? []).map(p => ({ 
+              ...p, 
+              _storeId: s.id, 
+              _storeName: s.store_name,
+              // Add location info for inventory tracking
+              _storeCity: s.city,
+              _storeState: s.state,
+            }));
+          })
+        );
+        const merged = results.flat();
+        setAllProducts(merged);
+        setProducts(merged);
+        setTotal(merged.length);
+      } else {
+        // Single store mode
+        const res = await getStoreProducts(storeId, page, LIMIT);
+        const storeMeta = stores.find(s => s.id === storeId);
+        const withMeta = (res.data ?? []).map(p => ({ 
+          ...p, 
+          _storeId: storeId, 
+          _storeName: storeMeta?.store_name,
+          _storeCity: storeMeta?.city,
+          _storeState: storeMeta?.state,
+        }));
+        setProducts(withMeta);
+        setTotal(res.total ?? 0);
+      }
     } catch (e: unknown) {
       setLoadError(e instanceof ApiError ? e.message : 'Failed to load products.');
     } finally {
       setLoading(false);
     }
-  }, [storeId, page]);
+  }, [storeId, page, stores]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  // Reset to page 1 when store switches
   const handleStoreChange = (id: string) => {
     setStoreId(id);
     setPage(1);
   };
 
-  // Client-side filter
-  const filtered = products.filter(p => {
+  useEffect(() => { setPage(1); }, [search, catFilter, statusFilter, storeId]);
+
+  // Client-side filter with inventory awareness
+  const matchesFilters = useCallback((p: ApiProductWithStore) => {
     const matchSearch =
       (p.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (p.sku ?? '').toLowerCase().includes(search.toLowerCase());
@@ -359,20 +571,50 @@ export function BusinessInventory() {
       (statusFilter === 'low' && p.stock_status === 'low_stock') ||
       (statusFilter === 'out_of_stock' && p.stock_status === 'out_of_stock');
     return matchSearch && matchCat && matchStatus;
-  });
+  }, [search, catFilter, statusFilter]);
 
-  // Stats — from server; fall back to client-side counts only if stats not loaded yet
-  const totalValue = stats?.inventory_value ?? 0;
-  const lowStockCount = stats?.low_stock ?? products.filter(p => p.stock_status === 'low_stock').length;
-  const outOfStockCount = stats?.out_of_stock ?? products.filter(p => p.stock_status === 'out_of_stock').length;
+  const filteredFull = useMemo(
+    () => (isAllStores ? allProducts : products).filter(matchesFilters),
+    [isAllStores, allProducts, products, matchesFilters]
+  );
 
-  const handleDelete = async (productId: string) => {
-    if (!storeId) return;
+  const filtered = isAllStores
+    ? filteredFull.slice((page - 1) * LIMIT, page * LIMIT)
+    : filteredFull;
+
+  const totalPages = isAllStores
+    ? Math.max(1, Math.ceil(filteredFull.length / LIMIT))
+    : Math.max(1, Math.ceil((total ?? 0) / LIMIT));
+
+  const pageNumbers = getPageNumbers(page, totalPages);
+
+  // Compute stats with inventory awareness
+  const computedAllStats = useMemo(() => {
+    if (!isAllStores) return null;
+    return {
+      total_products: allProducts.length,
+      inventory_value: allProducts.reduce((sum, p) => sum + (p.price ?? 0) * (p.stock_quantity ?? 0), 0),
+      low_stock: allProducts.filter(p => p.stock_status === 'low_stock').length,
+      out_of_stock: allProducts.filter(p => p.stock_status === 'out_of_stock').length,
+      active_products: allProducts.filter(p => p.is_active).length,
+    };
+  }, [isAllStores, allProducts]);
+
+  const activeStats = isAllStores ? computedAllStats : stats;
+  const totalValue = activeStats?.inventory_value ?? 0;
+  const lowStockCount = activeStats?.low_stock ?? filteredFull.filter(p => p.stock_status === 'low_stock').length;
+  const outOfStockCount = activeStats?.out_of_stock ?? filteredFull.filter(p => p.stock_status === 'out_of_stock').length;
+
+  const handleDelete = async (p: ApiProductWithStore) => {
+    const targetStoreId = p._storeId ?? (isAllStores ? undefined : storeId);
+    if (!targetStoreId) return;
     if (!window.confirm('Delete this product? This cannot be undone.')) return;
-    setDeleting(productId);
+    setDeleting(p.id);
     try {
-      await deleteProduct(storeId, productId);
-      setProducts(ps => ps.filter(p => p.id !== productId));
+      await deleteProduct(targetStoreId, p.id);
+      setProducts(ps => ps.filter(x => x.id !== p.id));
+      setAllProducts(ps => ps.filter(x => x.id !== p.id));
+      setTotal(t => Math.max(0, t - 1));
       showToast('Product deleted.', 'success');
     } catch (e: unknown) {
       showToast(e instanceof ApiError ? e.message : 'Failed to delete.', 'error');
@@ -381,18 +623,16 @@ export function BusinessInventory() {
     }
   };
 
-  const handleSaved = (saved: ApiProduct) => {
-    const savedMode = modal?.mode;
-    setProducts(ps => {
+  const handleSaved = (saved: ApiProductWithStore) => {
+    const mergeIn = (ps: ApiProductWithStore[]) => {
       const exists = ps.find(p => p.id === saved.id);
       return exists ? ps.map(p => p.id === saved.id ? saved : p) : [saved, ...ps];
-    });
+    };
+    setProducts(mergeIn);
+    setAllProducts(mergeIn);
     setModal(null);
-    showToast(savedMode === 'add' ? 'Product added!' : 'Product updated!', 'success');
+    showToast(modal?.mode === 'add' ? 'Product added!' : 'Product updated!', 'success');
   };
-
-  const totalPages = Math.ceil((total ?? 0) / LIMIT);
-  const pageNumbers = getPageNumbers(page, totalPages);
 
   return (
     <>
@@ -422,6 +662,111 @@ export function BusinessInventory() {
           padding: 16px;
           background: var(--gray-50);
           min-height: 100vh;
+        }
+
+        /* ── Location dropdown (page selector + form field) ────────── */
+        .loc-dropdown { position: relative; }
+        .loc-dropdown--page { min-width: 240px; }
+        .loc-dropdown--field { width: 100%; }
+
+        .loc-dropdown__trigger {
+          display: flex; align-items: center; gap: 10px;
+          width: 100%;
+          background: #fff;
+          border: 1.5px solid var(--brand);
+          border-radius: 10px;
+          padding: 8px 12px;
+          cursor: pointer;
+          text-align: left;
+          transition: border-color .15s, box-shadow .15s;
+        }
+        .loc-dropdown--field .loc-dropdown__trigger {
+          border-color: var(--gray-200);
+          background: var(--gray-50);
+          padding: 9px 12px;
+        }
+        .loc-dropdown--field.loc-dropdown--open .loc-dropdown__trigger,
+        .loc-dropdown--field .loc-dropdown__trigger:hover { border-color: var(--brand); background: #fff; }
+        .loc-dropdown__trigger--error { border-color: var(--red) !important; }
+        .loc-dropdown--open .loc-dropdown__trigger { box-shadow: 0 0 0 3px rgba(139,21,56,.12); }
+
+        .loc-dropdown__trigger-icon {
+          width: 28px; height: 28px; border-radius: 8px;
+          background: #8B153814; color: var(--brand);
+          display: flex; align-items: center; justify-content: center;
+          flex-shrink: 0;
+        }
+        .loc-dropdown--field .loc-dropdown__trigger-icon { width: 24px; height: 24px; }
+
+        .loc-dropdown__trigger-text {
+          display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px;
+        }
+        .loc-dropdown__trigger-label {
+          font-size: 10px; font-weight: 700; letter-spacing: .06em;
+          color: var(--brand);
+        }
+        .loc-dropdown__trigger-name {
+          font-size: 13px; font-weight: 700; color: var(--gray-800);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .loc-dropdown__trigger-sub {
+          font-size: 11px; color: var(--gray-500);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .loc-dropdown__chevron { color: var(--gray-400); transition: transform .15s; flex-shrink: 0; }
+        .loc-dropdown--open .loc-dropdown__chevron { transform: rotate(180deg); }
+
+        .loc-dropdown__panel {
+          position: absolute; top: calc(100% + 6px); left: 0;
+          width: max(100%, 280px);
+          background: #fff;
+          border-radius: 12px;
+          border: 1px solid var(--gray-200);
+          box-shadow: 0 12px 32px rgba(0,0,0,.14);
+          z-index: 50;
+          overflow: hidden;
+        }
+        .loc-dropdown__search {
+          display: flex; align-items: center; gap: 8px;
+          padding: 10px 12px;
+          border-bottom: 1px solid var(--gray-100);
+          color: var(--gray-400);
+        }
+        .loc-dropdown__search input {
+          flex: 1; border: none; outline: none; font-size: 13px;
+          background: transparent; color: var(--gray-800);
+        }
+        .loc-dropdown__list { max-height: 260px; overflow-y: auto; padding: 6px; }
+        .loc-dropdown__empty { padding: 16px; text-align: center; font-size: 12px; color: var(--gray-400); }
+
+        .loc-dropdown__option {
+          display: flex; align-items: center; gap: 10px;
+          width: 100%; padding: 9px 10px; border-radius: 8px;
+          background: none; border: none; cursor: pointer; text-align: left;
+          transition: background .12s;
+        }
+        .loc-dropdown__option:hover { background: var(--gray-50); }
+        .loc-dropdown__option--active { background: #8B153810; }
+        .loc-dropdown__option-icon {
+          width: 26px; height: 26px; border-radius: 7px;
+          background: var(--gray-100); color: var(--gray-500);
+          display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .loc-dropdown__option--active .loc-dropdown__option-icon { background: #8B153820; color: var(--brand); }
+        .loc-dropdown__option-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; flex: 1; }
+        .loc-dropdown__option-name { font-size: 13px; font-weight: 600; color: var(--gray-800); }
+        .loc-dropdown__option-sub {
+          font-size: 11px; color: var(--gray-500);
+          display: flex; align-items: center; gap: 3px;
+        }
+        .loc-dropdown__check { color: var(--brand); flex-shrink: 0; }
+
+        .loc-tag {
+          display: inline-flex; align-items: center; gap: 4px;
+          padding: 3px 8px; border-radius: 20px;
+          font-size: 10px; font-weight: 700;
+          background: var(--gray-100); color: #4B5563;
+          white-space: nowrap;
         }
 
         /* ── Stats grid ──────────────────────────── */
@@ -492,18 +837,6 @@ export function BusinessInventory() {
           transition: border-color .15s;
         }
         .inv-controls select:focus { border-color: var(--brand); background: #fff; }
-
-        .inv-store-select {
-          padding: 9px 12px;
-          border: 1.5px solid var(--brand);
-          border-radius: 10px;
-          font-size: 13px;
-          outline: none;
-          background: #fff;
-          color: var(--brand);
-          font-weight: 600;
-          cursor: pointer;
-        }
 
         /* ── Buttons ─────────────────────────────── */
         .inv-btn {
@@ -597,7 +930,7 @@ export function BusinessInventory() {
           font-weight: 600; font-size: 13px; color: var(--gray-800);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .inv-mobile-card__meta { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+        .inv-mobile-card__meta { font-size: 12px; color: var(--gray-500); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .inv-mobile-card__actions { display: flex; gap: 6px; }
 
         /* ── Badges ──────────────────────────────── */
@@ -724,7 +1057,7 @@ export function BusinessInventory() {
           transition: color .15s;
         }
         .inv-modal__close:hover { color: var(--gray-700); }
-        .inv-modal__body { padding: 20px 24px; flex: 1; overflow-y: auto; }
+        .inv-modal__body { padding: 20px 24px; flex: 1; overflow-y: auto; overflow-x: visible; }
         .inv-modal__footer {
           padding: 16px 24px;
           border-top: 1px solid var(--gray-100);
@@ -742,7 +1075,7 @@ export function BusinessInventory() {
         @media (max-width: 479px) { .inv-form-grid { grid-template-columns: 1fr; } }
         .inv-field { display: flex; flex-direction: column; gap: 5px; }
         .inv-field--full { grid-column: 1 / -1; }
-        .inv-field label { font-size: 12px; font-weight: 600; color: var(--gray-600, #4B5563); }
+        .inv-field label { font-size: 12px; font-weight: 600; color: #4B5563; }
         .inv-field input,
         .inv-field select,
         .inv-field textarea {
@@ -792,11 +1125,12 @@ export function BusinessInventory() {
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
         {/* Modal */}
-        {modal && storeId && (
+        {modal && stores.length > 0 && (
           <ProductModal
             mode={modal.mode}
             product={modal.product}
-            storeId={storeId}
+            stores={stores}
+            defaultStoreId={storeId ?? undefined}
             categories={categories}
             onClose={() => setModal(null)}
             onSaved={handleSaved}
@@ -811,10 +1145,22 @@ export function BusinessInventory() {
           </div>
         )}
 
-        {/* Stats */}
+        {/* Location selector with multi-location inventory tracking */}
+        {stores.length > 0 && (
+          <LocationDropdown
+            stores={stores}
+            value={storeId ?? ''}
+            onChange={handleStoreChange}
+            includeAll={stores.length > 1}
+            variant="page"
+            label="Select Store"
+          />
+        )}
+
+        {/* Stats with inventory awareness */}
         <div className="inv-stats">
           {[
-            { icon: Package, label: 'Total Products', value: (stats?.total_products ?? total ?? 0).toString(), color: '#8B1538' },
+            { icon: Package, label: 'Total Products', value: (activeStats?.total_products ?? total ?? 0).toString(), color: '#8B1538' },
             { icon: AlertTriangle, label: 'Low Stock', value: lowStockCount.toString(), color: '#D97706' },
             { icon: Package, label: 'Out of Stock', value: outOfStockCount.toString(), color: '#DC2626' },
             {
@@ -837,16 +1183,6 @@ export function BusinessInventory() {
 
         {/* Controls */}
         <div className="inv-controls">
-          {stores.length > 1 && (
-            <select
-              className="inv-store-select"
-              value={storeId ?? ''}
-              onChange={e => handleStoreChange(e.target.value)}
-            >
-              {stores.map(s => <option key={s.id} value={s.id}>{s.store_name}</option>)}
-            </select>
-          )}
-
           <div className="inv-controls__search">
             <Search style={{ width: 15, height: 15 }} />
             <input
@@ -884,7 +1220,7 @@ export function BusinessInventory() {
           <button
             className="inv-btn inv-btn--primary"
             onClick={() => setModal({ mode: 'add' })}
-            disabled={!storeId}
+            disabled={!storeId || stores.length === 0}
           >
             <Plus style={{ width: 14, height: 14 }} /> Add Product
           </button>
@@ -893,7 +1229,10 @@ export function BusinessInventory() {
         {/* Table */}
         <div className="inv-table-card">
           <div className="inv-table-card__head">
-            <span>{filtered.length} product{filtered.length !== 1 ? 's' : ''}</span>
+            <span>
+              {filteredFull.length} product{filteredFull.length !== 1 ? 's' : ''}
+              {isAllStores ? ' across all stores' : ''}
+            </span>
             <Filter style={{ width: 14, height: 14 }} />
           </div>
 
@@ -909,7 +1248,7 @@ export function BusinessInventory() {
                 <table className="inv-table">
                   <thead>
                     <tr>
-                      {['Product', 'SKU', 'Category', 'Price', 'Stock', 'Status', 'Actions'].map(h => (
+                      {['Product', 'SKU', ...(isAllStores ? ['Location'] : []), 'Category', 'Price', 'Stock', 'Status', 'Actions'].map(h => (
                         <th key={h}>{h}</th>
                       ))}
                     </tr>
@@ -928,6 +1267,7 @@ export function BusinessInventory() {
                           </div>
                         </td>
                         <td><code style={{ fontSize: 11, color: '#6B7280' }}>{p.sku}</code></td>
+                        {isAllStores && <td><LocationTag name={p._storeName} /></td>}
                         <td>
                           <span style={{
                             padding: '3px 9px', borderRadius: 20,
@@ -957,7 +1297,7 @@ export function BusinessInventory() {
                             <button
                               className="inv-btn--icon"
                               style={{ color: '#EF4444' }}
-                              onClick={() => handleDelete(p.id)}
+                              onClick={() => handleDelete(p)}
                               disabled={deleting === p.id}
                               title="Delete"
                             >
@@ -1000,6 +1340,7 @@ export function BusinessInventory() {
                       <div className="inv-mobile-card__name">{p.name}</div>
                       <div className="inv-mobile-card__meta">
                         ₦{(p.price ?? 0).toLocaleString()} · <StockBadge status={p.stock_status} qty={p.stock_quantity ?? 0} />
+                        {isAllStores && <LocationTag name={p._storeName} />}
                       </div>
                     </div>
                     <div className="inv-mobile-card__actions">
@@ -1013,7 +1354,7 @@ export function BusinessInventory() {
                       <button
                         className="inv-btn--icon"
                         style={{ color: '#EF4444' }}
-                        onClick={() => handleDelete(p.id)}
+                        onClick={() => handleDelete(p)}
                         disabled={deleting === p.id}
                       >
                         {deleting === p.id
@@ -1025,10 +1366,9 @@ export function BusinessInventory() {
                 ))}
               </div>
 
-              {/* ── Pagination ── */}
+              {/* Pagination */}
               {totalPages > 1 && (
                 <div className="inv-pagination">
-                  {/* Prev */}
                   <button
                     className="inv-page-btn inv-page-btn--nav"
                     disabled={page <= 1}
@@ -1038,7 +1378,6 @@ export function BusinessInventory() {
                     <ChevronLeft style={{ width: 14, height: 14 }} />
                   </button>
 
-                  {/* Numbered pages */}
                   {pageNumbers.map((p, i) =>
                     p === '…' ? (
                       <span key={`ellipsis-${i}`} className="inv-page-ellipsis">…</span>
@@ -1055,7 +1394,6 @@ export function BusinessInventory() {
                     )
                   )}
 
-                  {/* Next */}
                   <button
                     className="inv-page-btn inv-page-btn--nav"
                     disabled={page >= totalPages}
@@ -1065,9 +1403,8 @@ export function BusinessInventory() {
                     <ChevronRight style={{ width: 14, height: 14 }} />
                   </button>
 
-                  {/* Summary */}
                   <span className="inv-pagination__info">
-                    {((page - 1) * LIMIT) + 1}–{Math.min(page * LIMIT, total)} of {total.toLocaleString()}
+                    {((page - 1) * LIMIT) + 1}–{Math.min(page * LIMIT, filteredFull.length)} of {filteredFull.length.toLocaleString()}
                   </span>
                 </div>
               )}

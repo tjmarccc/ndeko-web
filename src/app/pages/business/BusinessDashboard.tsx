@@ -1,729 +1,329 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useState } from 'react';
 import {
-  TrendingUp, ShoppingBag, Package, Eye, ArrowUpRight,
-  AlertTriangle, ChevronRight, Loader2, RefreshCw, Store,
+  TrendingUp, Package, ShoppingBag, DollarSign, AlertCircle,
+  RefreshCw, ArrowUpRight, ArrowDownRight, Eye, Heart, Loader2,
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer,
-} from 'recharts';
-import {
-  ApiError,
-  getMyStores,
-  getStoreDashboard,
-  getStoreSnapshots,
-  getTopProducts,
-  getStoreOrders,
-  getStoreProducts,
-  type ApiStore,
-  type ApiProduct,
-  type ApiOrder,
-  type PaginatedResponse,
-  type StoreDashboard,
-  type StoreSnapshot,
-} from '../../services/api';
+import { Button } from '../../components/ui/button';
+import { Card } from '../../components/ui/card';
+import { useAuth } from '../../contexts/AuthContext';
 
-// ─── Local dashboard data type ────────────────────────────────────────────────
-
-type DashboardData = StoreDashboard;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmt(n: number): string {
-  const safe = n ?? 0;
-  if (safe >= 1_000_000) return `₦${(safe / 1_000_000).toFixed(2)}M`;
-  if (safe >= 1_000) return `₦${(safe / 1_000).toFixed(1)}K`;
-  return `₦${safe.toLocaleString()}`;
+interface DashboardMetrics {
+  total_sales: number;
+  total_orders: number;
+  total_products: number;
+  total_customers: number;
+  pending_orders: number;
+  views_today: number;
+  likes_today: number;
+  sales_growth: number;
+  orders_growth: number;
+  recent_orders: Order[];
+  top_products: Product[];
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+interface Order {
+  id: string;
+  order_number: string;
+  total_amount: number;
+  status: string;
+  created_at: string;
+  items_count: number;
 }
 
-// Build a 7-day revenue array from snapshots or order list fallback
-function buildRevenueChart(
-  snapshots?: StoreSnapshot[],
-  orders?: ApiOrder[]
-): { day: string; revenue: number }[] {
-  if (snapshots && snapshots.length > 0) {
-    return [...snapshots].reverse().slice(0, 7).reverse().map(s => ({
-      day: new Date(s.snapshot_date).toLocaleDateString('en-NG', { weekday: 'short' }),
-      revenue: s.revenue ?? 0,
-    }));
-  }
-  // Fallback: bucket recent orders by day
-  const days: Record<string, number> = {};
-  const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    days[d.toDateString()] = 0;
-  }
-  (orders ?? []).forEach(o => {
-    const key = new Date(o.created_at).toDateString();
-    if (key in days) days[key] = (days[key] ?? 0) + (o.total_amount ?? 0);
-  });
-  return Object.entries(days).map(([d, revenue]) => ({
-    day: new Date(d).toLocaleDateString('en-NG', { weekday: 'short' }),
-    revenue,
-  }));
+interface Product {
+  id: string;
+  name: string;
+  stock_quantity: number;
+  price: number;
+  sales_count: number;
+  views: number;
 }
 
-// ─── Status config ────────────────────────────────────────────────────────────
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  change?: number;
+  icon: React.ReactNode;
+  trend?: 'up' | 'down' | 'neutral';
+  loading?: boolean;
+  error?: string;
+}
 
-const STATUS_CFG: Record<string, { bg: string; color: string; label: string }> = {
-  pending: { bg: '#FEF3C7', color: '#D97706', label: 'Pending' },
-  processing: { bg: '#DBEAFE', color: '#2563EB', label: 'Processing' },
-  shipped: { bg: '#D1FAE5', color: '#059669', label: 'Shipped' },
-  delivered: { bg: '#F0FDF4', color: '#16A34A', label: 'Delivered' },
-  cancelled: { bg: '#FEE2E2', color: '#DC2626', label: 'Cancelled' },
-};
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Skeleton({ w = '100%', h = 20, r = 8 }: { w?: string | number; h?: number; r?: number }) {
+const StatCard: React.FC<StatCardProps> = ({
+  label,
+  value,
+  change,
+  icon,
+  trend = 'neutral',
+  loading = false,
+  error,
+}) => {
   return (
-    <div
-      style={{
-        width: w, height: h, borderRadius: r,
-        background: 'linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'db-shimmer 1.4s infinite',
-        flexShrink: 0,
-      }}
-    />
-  );
-}
-
-function StatCard({
-  icon: Icon, label, value, sub, color, loading,
-}: {
-  icon: React.ElementType; label: string; value: string;
-  sub?: string; color: string; loading?: boolean;
-}) {
-  return (
-    <div className="db-card db-stat-card">
-      <div className="db-stat-card__top">
-        <div className="db-stat-card__icon" style={{ background: `${color}18` }}>
-          <Icon style={{ width: 18, height: 18, color }} />
+    <Card className="p-4 sm:p-6 dark:bg-gray-800 dark:border-gray-700">
+      {error ? (
+        <div className="flex items-start gap-3 text-red-600 dark:text-red-400">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="text-xs sm:text-sm">{error}</div>
         </div>
-        {sub && !loading && (
-          <span className="db-stat-card__change">
-            <TrendingUp style={{ width: 11, height: 11 }} /> {sub}
-          </span>
-        )}
-      </div>
-      <p className="db-stat-card__label">{label}</p>
-      {loading
-        ? <Skeleton h={28} w="60%" />
-        : <p className="db-stat-card__value">{value}</p>}
-    </div>
-  );
-}
-
-function OrderStatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CFG[status] ?? { bg: '#F3F4F6', color: '#6B7280', label: status };
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '3px 9px',
-        borderRadius: 20,
-        fontSize: 11,
-        fontWeight: 700,
-        background: cfg.bg,
-        color: cfg.color,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {cfg.label}
-    </span>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
-
-export function BusinessDashboard() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [stores, setStores] = useState<ApiStore[]>([]);
-
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [snapshots, setSnapshots] = useState<StoreSnapshot[]>([]);
-  const [topProducts, setTopProducts] = useState<ApiProduct[]>([]);
-  const [recentOrders, setRecentOrders] = useState<ApiOrder[]>([]);
-  const [allProducts, setAllProducts] = useState<ApiProduct[]>([]);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  // Load stores on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await getMyStores();
-        const list: ApiStore[] = Array.isArray(raw) ? raw : (raw as { data?: ApiStore[] }).data ?? [];
-        setStores(list);
-        if (list[0]?.id) setStoreId(list[0].id);
-        else { setLoading(false); setError('No stores found. Create a store to see your dashboard.'); }
-      } catch (e) {
-        const msg = e instanceof ApiError ? `${e.message} (${e.status})` : 'Failed to load stores.';
-        setError(msg);
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // Load all dashboard data when storeId changes
-  const loadDashboard = useCallback(async () => {
-    if (!storeId) return;
-    setLoading(true);
-    setError('');
-    try {
-      // Get date range: last 30 days
-      const to = new Date().toISOString().split('T')[0];
-      const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - 30);
-      const from = fromDate.toISOString().split('T')[0];
-
-      const [dash, snapshotsRes, tpRaw, ordersRes, prodsRes] = await Promise.allSettled([
-        getStoreDashboard(storeId, from, to),
-        getStoreSnapshots(storeId, 7),
-        getTopProducts(storeId, 5),
-        getStoreOrders(storeId, 1, 5),
-        getStoreProducts(storeId, 1, 100),
-      ]);
-
-      if (dash.status === 'fulfilled') setDashboard(dash.value);
-      if (snapshotsRes.status === 'fulfilled') setSnapshots(snapshotsRes.value.data ?? []);
-      if (tpRaw.status === 'fulfilled') {
-        const v = tpRaw.value;
-        setTopProducts(Array.isArray(v) ? v : (v as PaginatedResponse<ApiProduct>).data ?? []);
-      }
-      if (ordersRes.status === 'fulfilled') setRecentOrders(ordersRes.value.data ?? []);
-      if (prodsRes.status === 'fulfilled') setAllProducts(prodsRes.value.data ?? []);
-    } catch (e) {
-      const msg = e instanceof ApiError ? `${e.message} (${e.status})` : 'Failed to load dashboard.';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [storeId]);
-
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
-
-  // ── Derived values ──────────────────────────────────────────────────────────
-
-  const revenue = dashboard?.revenue ?? 0;
-  const ordersCount = dashboard?.orders
-    ? Object.values(dashboard.orders).reduce((a, b) => a + b, 0)
-    : 0;
-  const activeProducts = dashboard?.active_products ?? allProducts.filter(p => p.is_active).length;
-  const visitors = dashboard?.visitors ?? stores.find(s => s.id === storeId)?.visitor_count ?? 0;
-
-  const lowStock = allProducts.filter(p => p.stock_status === 'low_stock').length;
-  const outOfStock = allProducts.filter(p => p.stock_status === 'out_of_stock').length;
-
-  const statusSummary: Record<string, number> = dashboard?.orders ?? (() => {
-    const s: Record<string, number> = { pending: 0, processing: 0, shipped: 0, delivered: 0 };
-    recentOrders.forEach(o => { if (o.status in s) s[o.status]++; });
-    return s;
-  })();
-
-  const chartData = buildRevenueChart(snapshots, recentOrders);
-
-  // Use review_count as the ranking metric for the % bar (stock_quantity ≠ sales rank)
-  const maxReviews = Math.max(...topProducts.map(p => p.review_count ?? 0), 1);
-
-  return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
-
-        .db-root {
-          --brand: #8B1538;
-          --brand-light: #D4828F;
-          --teal: #3D9B8E;
-          --gray-50: #F9FAFB;
-          --gray-100: #F3F4F6;
-          --gray-200: #E5E7EB;
-          --gray-400: #9CA3AF;
-          --gray-500: #6B7280;
-          --gray-700: #374151;
-          --gray-800: #1F2937;
-          --radius: 16px;
-          --shadow: 0 1px 4px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
-          font-family: 'DM Sans', 'Segoe UI', sans-serif;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          padding: 16px;
-          background: var(--gray-50);
-          min-height: 100dvh;
-        }
-
-        /* ── Store switcher row ─────────────────── */
-        .db-topbar {
-          display: flex; align-items: center;
-          gap: 10px; flex-wrap: wrap;
-        }
-        .db-store-select {
-          padding: 8px 14px;
-          border: 1.5px solid var(--brand);
-          border-radius: 10px;
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--brand);
-          background: #fff;
-          outline: none;
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .db-refresh-btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 8px 14px;
-          border: 1.5px solid var(--gray-200);
-          border-radius: 10px;
-          font-size: 12px; font-weight: 600;
-          color: var(--gray-500);
-          background: #fff;
-          cursor: pointer;
-          margin-left: auto;
-          transition: border-color .15s, color .15s;
-        }
-        .db-refresh-btn:hover { border-color: var(--brand); color: var(--brand); }
-        .db-refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-        /* ── Alert banner ──────────────────────── */
-        .db-alert {
-          display: flex; align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap; gap: 10px;
-          padding: 14px 18px;
-          border-radius: var(--radius);
-          background: linear-gradient(135deg, #FEF3C7, #FDE68A);
-        }
-        .db-alert__left { display: flex; align-items: center; gap: 10px; }
-        .db-alert__text { font-size: 13px; font-weight: 500; color: #92400E; }
-        .db-alert__link {
-          display: flex; align-items: center; gap: 4px;
-          font-size: 12px; font-weight: 700;
-          color: #78350F; white-space: nowrap;
-          text-decoration: none;
-        }
-        .db-alert__link:hover { text-decoration: underline; }
-
-        /* ── Card base ─────────────────────────── */
-        .db-card {
-          background: #fff;
-          border-radius: var(--radius);
-          box-shadow: var(--shadow);
-          border: 1px solid var(--gray-100);
-        }
-
-        /* ── Stat cards grid ───────────────────── */
-        .db-stats-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-        }
-        @media (min-width: 900px) {
-          .db-stats-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-
-        .db-stat-card { padding: 16px; }
-        .db-stat-card__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-        .db-stat-card__icon {
-          width: 38px; height: 38px; border-radius: 11px;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .db-stat-card__change {
-          display: flex; align-items: center; gap: 3px;
-          font-size: 11px; font-weight: 700;
-          color: #059669; background: #D1FAE5;
-          padding: 3px 8px; border-radius: 20px;
-        }
-        .db-stat-card__label { font-size: 11px; color: var(--gray-500); font-weight: 500; margin-bottom: 5px; }
-        .db-stat-card__value { font-size: 22px; font-weight: 800; color: var(--gray-800); line-height: 1.1; }
-
-        /* ── Middle section grid ───────────────── */
-        .db-mid-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 14px;
-        }
-        @media (min-width: 900px) {
-          .db-mid-grid { grid-template-columns: 3fr 2fr; }
-        }
-
-        /* ── Chart card ────────────────────────── */
-        .db-chart-card { padding: 20px; }
-        .db-chart-card__header {
-          display: flex; align-items: flex-start; justify-content: space-between;
-          margin-bottom: 18px; flex-wrap: wrap; gap: 8px;
-        }
-        .db-chart-card__title { font-size: 15px; font-weight: 800; color: var(--gray-800); }
-        .db-chart-card__sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
-        .db-chart-card__badge {
-          padding: 4px 12px; border-radius: 20px;
-          font-size: 11px; font-weight: 700; color: #fff;
-          background: linear-gradient(135deg, var(--brand), var(--brand-light));
-          white-space: nowrap;
-        }
-
-        /* ── Right column ──────────────────────── */
-        .db-right-col { display: flex; flex-direction: column; gap: 14px; }
-
-        .db-mini-card { padding: 18px; }
-        .db-mini-card__title { font-size: 14px; font-weight: 800; color: var(--gray-800); margin-bottom: 14px; }
-
-        /* Top products */
-        .db-top-product { margin-bottom: 12px; }
-        .db-top-product:last-child { margin-bottom: 0; }
-        .db-top-product__row {
-          display: flex; align-items: center; gap: 10px; margin-bottom: 5px;
-        }
-        .db-top-product__img {
-          width: 30px; height: 30px; border-radius: 8px;
-          object-fit: cover; background: var(--gray-100); flex-shrink: 0;
-        }
-        .db-top-product__name {
-          font-size: 12px; font-weight: 600; color: var(--gray-700);
-          flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .db-top-product__price {
-          font-size: 12px; font-weight: 700; color: var(--gray-800); white-space: nowrap;
-        }
-        .db-bar-track {
-          height: 5px; background: var(--gray-100); border-radius: 10px; overflow: hidden;
-        }
-        .db-bar-fill {
-          height: 100%; border-radius: 10px;
-          background: linear-gradient(to right, var(--brand), var(--brand-light));
-          transition: width .6s ease;
-        }
-
-        /* Order summary grid */
-        .db-order-summary-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-        }
-        .db-order-summary-cell {
-          padding: 10px; border-radius: 12px; text-align: center;
-        }
-        .db-order-summary-cell__count {
-          font-size: 20px; font-weight: 800; line-height: 1.1;
-        }
-        .db-order-summary-cell__label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
-
-        /* ── Orders table ──────────────────────── */
-        .db-orders-card { overflow: hidden; }
-        .db-orders-card__header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 14px 20px;
-          border-bottom: 1px solid var(--gray-100);
-        }
-        .db-orders-card__title { font-size: 15px; font-weight: 800; color: var(--gray-800); }
-        .db-orders-card__link {
-          display: flex; align-items: center; gap: 4px;
-          font-size: 13px; font-weight: 700; color: var(--brand);
-          text-decoration: none;
-        }
-        .db-orders-card__link:hover { text-decoration: underline; }
-
-        .db-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        table.db-table { width: 100%; border-collapse: collapse; min-width: 520px; }
-        .db-table th {
-          padding: 9px 16px;
-          text-align: left; font-size: 11px; font-weight: 700;
-          text-transform: uppercase; letter-spacing: .05em;
-          color: var(--gray-400); background: var(--gray-50);
-          white-space: nowrap;
-        }
-        .db-table td {
-          padding: 12px 16px;
-          border-top: 1px solid var(--gray-50);
-          font-size: 13px; color: var(--gray-700);
-          vertical-align: middle;
-        }
-        .db-table tr:hover td { background: #FAFAFA; }
-
-        /* Mobile order cards */
-        .db-order-mobile-cards { display: none; }
-        @media (max-width: 599px) {
-          .db-table-wrap { display: none; }
-          .db-order-mobile-cards { display: flex; flex-direction: column; }
-        }
-        .db-order-mobile-card {
-          padding: 12px 16px;
-          border-top: 1px solid var(--gray-100);
-          display: flex; align-items: center; gap: 10px;
-        }
-        .db-order-mobile-card:first-child { border-top: none; }
-        .db-order-mobile-card__info { flex: 1; min-width: 0; }
-        .db-order-mobile-card__id {
-          font-size: 12px; font-family: monospace;
-          font-weight: 700; color: var(--brand); margin-bottom: 2px;
-        }
-        .db-order-mobile-card__date { font-size: 11px; color: var(--gray-400); }
-        .db-order-mobile-card__right { text-align: right; flex-shrink: 0; }
-        .db-order-mobile-card__amount { font-size: 13px; font-weight: 800; color: var(--gray-800); margin-bottom: 4px; }
-
-        /* ── Error / empty ─────────────────────── */
-        .db-error {
-          display: flex; align-items: center; gap: 10px;
-          padding: 14px 16px;
-          background: #FEF2F2; border: 1px solid #FECACA;
-          border-radius: var(--radius);
-          font-size: 13px; font-weight: 500; color: #DC2626;
-        }
-        .db-empty {
-          padding: 48px 24px; text-align: center;
-          color: var(--gray-400);
-        }
-        .db-empty p { font-weight: 600; margin-bottom: 4px; }
-
-        /* ── Loading spinner ───────────────────── */
-        .db-spin { animation: db-rotate 1s linear infinite; }
-        @keyframes db-rotate { to { transform: rotate(360deg); } }
-        @keyframes db-shimmer {
-          0%   { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-      `}</style>
-
-      <div className="db-root">
-
-        {/* Top bar: store switcher + refresh */}
-        <div className="db-topbar">
-          {stores.length > 1 && (
-            <select
-              className="db-store-select"
-              value={storeId ?? ''}
-              onChange={e => setStoreId(e.target.value)}
-            >
-              {stores.map(s => <option key={s.id} value={s.id}>{s.store_name}</option>)}
-            </select>
-          )}
-          {stores.length === 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: 'var(--brand)' }}>
-              <Store style={{ width: 16, height: 16 }} /> {stores[0].store_name}
-            </div>
-          )}
-          <button className="db-refresh-btn" onClick={loadDashboard} disabled={loading}>
-            <RefreshCw style={{ width: 13, height: 13 }} className={loading ? 'db-spin' : ''} />
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="db-error">
-            <AlertTriangle style={{ width: 16, height: 16, flexShrink: 0 }} />
-            {error}
-          </div>
-        )}
-
-        {/* Alert: low / out of stock */}
-        {(lowStock > 0 || outOfStock > 0) && !loading && (
-          <div className="db-alert">
-            <div className="db-alert__left">
-              <AlertTriangle style={{ width: 18, height: 18, color: '#D97706', flexShrink: 0 }} />
-              <p className="db-alert__text">
-                {lowStock > 0 && `${lowStock} product${lowStock > 1 ? 's' : ''} running low`}
-                {lowStock > 0 && outOfStock > 0 && ', '}
-                {outOfStock > 0 && `${outOfStock} out of stock`}
-              </p>
-            </div>
-            <Link to="/business/inventory" className="db-alert__link">
-              View Inventory <ChevronRight style={{ width: 14, height: 14 }} />
-            </Link>
-          </div>
-        )}
-
-        {/* Stat cards */}
-        <div className="db-stats-grid">
-          <StatCard icon={TrendingUp} label="Revenue (30 days)" value={loading ? '—' : fmt(revenue)} color="#8B1538" loading={loading} />
-          <StatCard icon={ShoppingBag} label="Orders (30 days)" value={loading ? '—' : (ordersCount ?? 0).toString()} color="#3D9B8E" loading={loading} />
-          <StatCard icon={Package} label="Active Products" value={loading ? '—' : (activeProducts ?? 0).toString()} color="#D4828F" loading={loading} />
-          <StatCard icon={Eye} label="Store Visitors" value={loading ? '—' : (visitors ?? 0).toLocaleString()} color="#6366F1" loading={loading} />
-        </div>
-
-        {/* Chart + side panel */}
-        <div className="db-mid-grid">
-          {/* Revenue chart */}
-          <div className="db-card db-chart-card">
-            <div className="db-chart-card__header">
-              <div>
-                <div className="db-chart-card__title">Weekly Revenue</div>
-                <div className="db-chart-card__sub">Last 7 days</div>
-              </div>
-              {!loading && <span className="db-chart-card__badge">{fmt(revenue)} MTD</span>}
-            </div>
-            {loading ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, gap: 10, color: 'var(--gray-400)', fontSize: 13 }}>
-                <Loader2 className="db-spin" style={{ width: 18, height: 18 }} /> Loading chart…
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="dbRevGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8B1538" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#8B1538" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} tickFormatter={v => `₦${((v ?? 0) / 1000).toFixed(0)}k`} width={44} />
-                  <Tooltip
-                    formatter={(v: number) => [`₦${(v ?? 0).toLocaleString()}`, 'Revenue']}
-                    contentStyle={{ borderRadius: 12, border: '1px solid #F3F4F6', boxShadow: '0 4px 20px rgba(0,0,0,.08)', fontSize: 12 }}
-                  />
-                  <Area type="monotone" dataKey="revenue" stroke="#8B1538" strokeWidth={2.5} fill="url(#dbRevGrad)" dot={{ fill: '#8B1538', r: 3 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          {/* Right column */}
-          <div className="db-right-col">
-            {/* Top Products */}
-            <div className="db-card db-mini-card">
-              <div className="db-mini-card__title">Top Products</div>
-              {loading ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {[1, 2, 3].map(i => <Skeleton key={i} h={36} />)}
-                </div>
-              ) : topProducts.length === 0 ? (
-                <p style={{ fontSize: 12, color: 'var(--gray-400)' }}>No product data yet.</p>
-              ) : (
-                topProducts.map((p, i) => (
-                  <div key={p.id ?? i} className="db-top-product">
-                    <div className="db-top-product__row">
-                      <img
-                        src={p.images?.[0] ?? 'https://via.placeholder.com/30?text=?'}
-                        alt={p.name}
-                        className="db-top-product__img"
-                        onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/30?text=?'; }}
-                      />
-                      <span className="db-top-product__name">{p.name}</span>
-                      <span className="db-top-product__price">{fmt(p.price ?? 0)}</span>
-                    </div>
-                    <div className="db-bar-track">
-                      <div className="db-bar-fill" style={{ width: `${Math.round(((p.review_count ?? 0) / maxReviews) * 100)}%` }} />
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Order Status Summary */}
-            <div className="db-card db-mini-card">
-              <div className="db-mini-card__title">Order Summary</div>
-              <div className="db-order-summary-grid">
-                {[
-                  { key: 'pending', label: 'Pending', color: '#D97706' },
-                  { key: 'processing', label: 'Processing', color: '#2563EB' },
-                  { key: 'shipped', label: 'Shipped', color: '#059669' },
-                  { key: 'delivered', label: 'Delivered', color: '#16A34A' },
-                ].map(s => (
-                  <div
-                    key={s.key}
-                    className="db-order-summary-cell"
-                    style={{ background: `${s.color}12` }}
-                  >
-                    {loading
-                      ? <Skeleton h={22} w="50%" r={4} />
-                      : <div className="db-order-summary-cell__count" style={{ color: s.color }}>{statusSummary[s.key] ?? 0}</div>}
-                    <div className="db-order-summary-cell__label">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Orders */}
-        <div className="db-card db-orders-card">
-          <div className="db-orders-card__header">
-            <h3 className="db-orders-card__title">Recent Orders</h3>
-            <Link to="/business/orders" className="db-orders-card__link">
-              View All <ArrowUpRight style={{ width: 14, height: 14 }} />
-            </Link>
+      ) : (
+        <>
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm font-medium">
+              {label}
+            </span>
+            <div className="text-[#8B1538] dark:text-[#D4828F]">{icon}</div>
           </div>
 
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 20px' }}>
-              {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} h={24} />)}
-            </div>
-          ) : recentOrders.length === 0 ? (
-            <div className="db-empty">
-              <ShoppingBag style={{ width: 36, height: 36, margin: '0 auto 12px', opacity: .3 }} />
-              <p>No orders yet</p>
-              <span style={{ fontSize: 12 }}>Orders will appear here once customers start buying</span>
+            <div className="flex items-center gap-2 py-3">
+              <Loader2 className="h-5 w-5 animate-spin text-[#8B1538]" />
+              <span className="text-xs text-gray-500">Loading...</span>
             </div>
           ) : (
             <>
-              {/* Desktop table */}
-              <div className="db-table-wrap">
-                <table className="db-table">
-                  <thead>
-                    <tr>
-                      {['Order ID', 'Total', 'Payment', 'Status', 'Date'].map(h => (
-                        <th key={h}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentOrders.map(o => (
-                      <tr key={o.id}>
-                        <td>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--brand)', fontSize: 12 }}>
-                            #{o.order_number}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight: 700, color: 'var(--gray-800)' }}>
-                          ₦{(o.total_amount ?? 0).toLocaleString()}
-                        </td>
-                        <td>
-                          <span style={{
-                            padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                            background: o.payment_status === 'paid' ? '#D1FAE5' : o.payment_status === 'failed' ? '#FEE2E2' : '#FEF3C7',
-                            color: o.payment_status === 'paid' ? '#059669' : o.payment_status === 'failed' ? '#DC2626' : '#D97706',
-                          }}>
-                            {o.payment_status}
-                          </span>
-                        </td>
-                        <td><OrderStatusBadge status={o.status} /></td>
-                        <td style={{ color: 'var(--gray-400)', fontSize: 12 }}>{fmtDate(o.created_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <h3 className="text-2xl sm:text-3xl font-bold dark:text-white mb-2">
+                {typeof value === 'number' ? value.toLocaleString() : value}
+              </h3>
 
-              {/* Mobile cards */}
-              <div className="db-order-mobile-cards">
-                {recentOrders.map(o => (
-                  <div key={o.id} className="db-order-mobile-card">
-                    <div className="db-order-mobile-card__info">
-                      <div className="db-order-mobile-card__id">#{o.order_number}</div>
-                      <div className="db-order-mobile-card__date">{fmtDate(o.created_at)}</div>
-                    </div>
-                    <div className="db-order-mobile-card__right">
-                      <div className="db-order-mobile-card__amount">₦{(o.total_amount ?? 0).toLocaleString()}</div>
-                      <OrderStatusBadge status={o.status} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {change !== undefined && (
+                <div
+                  className={`flex items-center gap-1 text-xs sm:text-sm font-medium ${
+                    trend === 'up'
+                      ? 'text-green-600 dark:text-green-400'
+                      : trend === 'down'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  {trend === 'up' && <ArrowUpRight className="h-3 w-3" />}
+                  {trend === 'down' && <ArrowDownRight className="h-3 w-3" />}
+                  <span>{Math.abs(change).toFixed(1)}% vs last month</span>
+                </div>
+              )}
             </>
           )}
-        </div>
+        </>
+      )}
+    </Card>
+  );
+};
 
+export function BusinessDashboard() {
+  const { user } = useAuth();
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchDashboard = async () => {
+    try {
+      const res = await fetch('/api/v1/analytics/dashboard', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ndeko_token')}` },
+      });
+
+      if (!res.ok) throw new Error('Failed to fetch dashboard');
+      const data = await res.json();
+      setMetrics(data);
+      setError(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load dashboard';
+      setError(msg);
+      console.error('Dashboard error:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDashboard();
+  };
+
+  if (loading) {
+    return (
+      <div className="p-4 sm:p-6">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <Loader2 className="h-12 w-12 animate-spin text-[#8B1538] mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading dashboard...</p>
+          </div>
+        </div>
       </div>
-    </>
+    );
+  }
+
+  return (
+    <div className="p-4 sm:p-6">
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold dark:text-white mb-1">
+            Welcome back, {user?.first_name || 'Seller'}! 👋
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            Here's what's happening with your store today.
+          </p>
+        </div>
+        <Button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          variant="outline"
+          size="sm"
+          className="gap-2"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </Button>
+      </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <h3 className="font-medium text-red-800 dark:text-red-300">
+              Error loading dashboard
+            </h3>
+            <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Metrics grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+        <StatCard
+          label="Total Sales"
+          value={`₦${metrics?.total_sales.toLocaleString() || '0'}`}
+          change={metrics?.sales_growth}
+          trend={metrics?.sales_growth ? (metrics.sales_growth > 0 ? 'up' : 'down') : 'neutral'}
+          icon={<DollarSign className="h-5 w-5" />}
+        />
+
+        <StatCard
+          label="Orders"
+          value={metrics?.total_orders || '0'}
+          change={metrics?.orders_growth}
+          trend={metrics?.orders_growth ? (metrics.orders_growth > 0 ? 'up' : 'down') : 'neutral'}
+          icon={<ShoppingBag className="h-5 w-5" />}
+        />
+
+        <StatCard
+          label="Products"
+          value={metrics?.total_products || '0'}
+          icon={<Package className="h-5 w-5" />}
+        />
+
+        <StatCard
+          label="Customers"
+          value={metrics?.total_customers || '0'}
+          icon={<TrendingUp className="h-5 w-5" />}
+        />
+      </div>
+
+      {/* Secondary metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-8">
+        <StatCard
+          label="Views Today"
+          value={metrics?.views_today || '0'}
+          icon={<Eye className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Likes Today"
+          value={metrics?.likes_today || '0'}
+          icon={<Heart className="h-5 w-5" />}
+        />
+      </div>
+
+      {/* Recent orders */}
+      {metrics?.recent_orders && metrics.recent_orders.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Recent Orders</h2>
+          <div className="grid gap-3">
+            {metrics.recent_orders.slice(0, 5).map((order) => (
+              <Card
+                key={order.id}
+                className="p-4 dark:bg-gray-800 dark:border-gray-700 flex items-center justify-between"
+              >
+                <div>
+                  <p className="font-semibold dark:text-white text-sm sm:text-base">
+                    {order.order_number}
+                  </p>
+                  <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                    {order.items_count} items • {new Date(order.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-[#8B1538] dark:text-[#D4828F] text-sm sm:text-base">
+                    ₦{order.total_amount.toLocaleString()}
+                  </p>
+                  <p
+                    className={`text-xs sm:text-sm font-medium ${
+                      order.status === 'COMPLETED'
+                        ? 'text-green-600 dark:text-green-400'
+                        : order.status === 'PENDING'
+                        ? 'text-yellow-600 dark:text-yellow-400'
+                        : 'text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    {order.status.replace('_', ' ')}
+                  </p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top products */}
+      {metrics?.top_products && metrics.top_products.length > 0 && (
+        <div>
+          <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Top Products</h2>
+          <div className="grid gap-3">
+            {metrics.top_products.slice(0, 5).map((product) => (
+              <Card
+                key={product.id}
+                className="p-4 dark:bg-gray-800 dark:border-gray-700"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="font-semibold dark:text-white text-sm sm:text-base line-clamp-2">
+                    {product.name}
+                  </h3>
+                  <span className="text-xs sm:text-sm font-bold text-[#8B1538] dark:text-[#D4828F]">
+                    ₦{product.price.toLocaleString()}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-xs sm:text-sm">
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Sales</span>
+                    <p className="font-bold dark:text-white">{product.sales_count}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Views</span>
+                    <p className="font-bold dark:text-white">{product.views}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Stock</span>
+                    <p
+                      className={`font-bold ${
+                        product.stock_quantity > 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}
+                    >
+                      {product.stock_quantity}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
-
-export default BusinessDashboard;

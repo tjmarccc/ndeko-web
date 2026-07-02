@@ -139,21 +139,22 @@ export const router = createBrowserRouter([
       { path: 'products', Component: Products },
       { path: 'product/:id', Component: ProductDetail },
       { path: 'cart', Component: Cart },
-      { path: 'checkout', Component: Checkout },
-      { path: 'order-confirmation', Component: OrderConfirmation },
       { path: 'deals', Component: Deals },
-      {
-        // Account requires auth; other buyer routes are public
-        element: <PrivateRoute />,
-        children: [
-          { path: 'account', Component: Account },
-          { path: 'checkout', Component: Checkout },
-        ],
-      },
       { path: 'wishlist', Component: Wishlist },
       { path: 'help', Component: Help },
       { path: 'contact', Component: Contact },
       { path: 'vendors', Component: VendorSearch },
+
+      // ── Protected routes ──
+      {
+        element: <PrivateRoute />,
+        children: [
+          { path: 'account', Component: Account },
+          { path: 'checkout', Component: Checkout },
+          { path: 'order-confirmation', Component: OrderConfirmation },
+        ],
+      },
+
       { path: '*', Component: NotFound },
     ],
   },

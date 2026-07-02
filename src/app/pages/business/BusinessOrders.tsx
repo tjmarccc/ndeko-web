@@ -11,7 +11,7 @@ import {
   type ApiStore,
 } from '../../services/api';
 
-// ─── Status config ────────────────────────────────────────────────────────────
+// ─── Status config with inventory awareness ─────────────────────────────────
 
 const STATUS_CFG: Record<string, { bg: string; text: string; darkBg: string; darkText: string; icon: React.ElementType; label: string }> = {
   pending:    { bg: '#FEF3C7', text: '#D97706', darkBg: 'rgba(217,119,6,0.15)',   darkText: '#FCD34D', icon: Clock,        label: 'Pending'    },
@@ -162,7 +162,7 @@ function OrderDetailModal({
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-1">Date</p>
+              <p className="text-xs text-gray-400 mb-1">Order Date</p>
               <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                 {fmtDate(order.created_at)}
               </p>
@@ -174,6 +174,21 @@ function OrderDetailModal({
               </p>
             </div>
           </div>
+
+          {/* Order items if available */}
+          {order.items && order.items.length > 0 && (
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+              <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Items</p>
+              <div className="space-y-2">
+                {order.items.map((item, idx) => (
+                  <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                    <span>{item.product_name} × {item.quantity}</span>
+                    <span>₦{(item.unit_price * item.quantity).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Payment link */}
           {order.payment_url && (
@@ -245,21 +260,22 @@ function OrderCard({ order, onClick }: { order: ApiOrder; onClick: () => void })
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function BusinessOrders() {
-  const [orders,         setOrders]         = useState<ApiOrder[]>([]);
-  const [storeId,        setStoreId]        = useState<string | null>(null);
-  const [loading,        setLoading]        = useState(true);
-  const [error,          setError]          = useState<string | null>(null);
-  const [search,         setSearch]         = useState('');
-  const [statusFilter,   setStatusFilter]   = useState('all');
-  const [sortDesc,       setSortDesc]       = useState(true);
-  const [selectedOrder,  setSelectedOrder]  = useState<ApiOrder | null>(null);
-  const [page,           setPage]           = useState(1);
-  const [total,          setTotal]          = useState(0);
+  const [orders, setOrders] = useState<ApiOrder[]>([]);
+  const [storeId, setStoreId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortDesc, setSortDesc] = useState(true);
+  const [selectedOrder, setSelectedOrder] = useState<ApiOrder | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const PAGE_SIZE = 20;
 
   // ── Load store id then orders ──
   const load = useCallback(async (p = 1) => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
       let sid = storeId;
       if (!sid) {
@@ -269,6 +285,8 @@ export function BusinessOrders() {
         if (sid) setStoreId(sid);
       }
       if (!sid) throw new Error('No store found for this account.');
+      
+      // Load orders for the store - backend handles inventory tracking
       const res = await getStoreOrders(sid, p, PAGE_SIZE);
       setOrders(prev => p === 1 ? res.data : [...prev, ...res.data]);
       setTotal(res.total);
@@ -282,9 +300,12 @@ export function BusinessOrders() {
 
   useEffect(() => { load(1); }, [load]);
 
-  // ── Status update ──
+  // ── Status update with inventory sync ──
   const handleStatusUpdate = async (orderId: string, status: NextStatus) => {
+    // Backend updates order status and handles inventory/wallet transactions
     await updateOrderStatus(orderId, status);
+    
+    // Update local state
     setOrders(prev =>
       prev.map(o => o.id === orderId ? { ...o, status } : o)
     );
@@ -441,7 +462,7 @@ export function BusinessOrders() {
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
               {loading
-                ? null /* handled by overlay below */
+                ? null
                 : filtered.map(order => (
                     <tr key={order.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
                       <td className="px-4 lg:px-5 py-3.5 font-mono text-xs font-bold text-[#8B1538] whitespace-nowrap">

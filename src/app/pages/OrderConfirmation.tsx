@@ -12,7 +12,7 @@ function statusLabel(s: ApiOrder['status']) {
 }
 
 function paymentLabel(m: string) {
-  return { card: 'Card', bank_transfer: 'Bank Transfer', wallet: 'Wallet' }[m] ?? m;
+  return { card: 'Card', bank_transfer: 'Bank Transfer', wallet: 'Wallet', pay_on_delivery: 'Pay on Delivery' }[m] ?? m;
 }
 
 function paymentStatusColor(s: ApiOrder['payment_status']) {
@@ -77,7 +77,7 @@ export function OrderConfirmation() {
             Order Placed Successfully!
           </h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base mb-6">
-            Thank you for shopping with Ndeko Express.
+            Thank you for shopping with Ndeko Express. Your order has been confirmed and inventory has been updated.
           </p>
 
           {/* ── Order reference ── */}
@@ -108,7 +108,7 @@ export function OrderConfirmation() {
           ) : error ? (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400 text-xs text-left mb-5">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              <span>Could not load full order details — your order was still placed.</span>
+              <span>Could not load full order details — your order was still placed successfully.</span>
             </div>
           ) : order ? (
             <div className="grid grid-cols-2 gap-3 mb-5 text-left">
@@ -146,6 +146,24 @@ export function OrderConfirmation() {
                   </p>
                 </div>
               </div>
+              
+              {/* Order items if available */}
+              {order.items && order.items.length > 0 && (
+                <div className="col-span-2 bg-white dark:bg-gray-900/60 rounded-xl p-3 border dark:border-gray-700">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-semibold">Items Ordered</p>
+                  <div className="space-y-1.5">
+                    {order.items.map((item, idx) => (
+                      <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                        <span className="truncate">{item.product_name} × {item.quantity}</span>
+                        <span className="font-semibold text-gray-800 dark:text-gray-200 ml-2">
+                          ₦{((item.unit_price ?? 0) * item.quantity).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Pay online link if present */}
               {order.payment_url && (
                 <div className="col-span-2">
@@ -168,13 +186,13 @@ export function OrderConfirmation() {
             <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-900/50">
               <Mail className="h-4 w-4 text-[#8B1538] mt-0.5 flex-shrink-0" />
               <p className="text-xs sm:text-sm dark:text-gray-300 leading-relaxed">
-                A confirmation email has been sent to your registered address.
+                A confirmation email has been sent to your registered address with all order details.
               </p>
             </div>
             <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-900/50">
               <Package className="h-4 w-4 text-[#3D9B8E] mt-0.5 flex-shrink-0" />
               <p className="text-xs sm:text-sm dark:text-gray-300 leading-relaxed">
-                Estimated delivery: <span className="font-semibold">2–5 business days</span> within Lagos, 3–7 for other states.
+                Estimated delivery: <span className="font-semibold">2–5 business days</span> within Lagos, 3–7 days for other states. Inventory has been reserved for your order.
               </p>
             </div>
           </div>

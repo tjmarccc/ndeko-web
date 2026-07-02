@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { useState, useEffect, useCallback } from 'react';
-import { fetchProductById } from '../services/api';
+import { fetchProductById, type ApiProduct } from '../services/api';
 
 interface StockWarning {
   productId: string;
@@ -18,19 +18,15 @@ interface StockWarning {
 // ─── CART PAGE ────────────────────────────────────────────────────────────────
 export function Cart() {
   const { cart, removeFromCart, updateQuantity, cartTotal, clearCart } = useCart();
-
-  // ✅ token now comes directly from AuthContext — no more TS error
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
 
-  const [stockWarnings, setStockWarnings]   = useState<StockWarning[]>([]);
-  const [isValidating, setIsValidating]     = useState(false);
-  const [isCheckingOut, setIsCheckingOut]   = useState(false);
-  const [checkoutError, setCheckoutError]   = useState<string | null>(null);
+  const [stockWarnings, setStockWarnings] = useState<StockWarning[]>([]);
+  const [isValidating, setIsValidating] = useState(false);
 
   const subtotal = cartTotal;
   const shipping = subtotal >= 20000 ? 0 : 2000;
-  const total    = subtotal + shipping;
+  const total = subtotal + shipping;
 
   // ── Validate stock when cart loads ─────────────────────────────────────────
   const validateCartStock = useCallback(async () => {
@@ -41,21 +37,31 @@ export function Cart() {
         cart.map(item => fetchProductById(item.id))
       );
       const warnings: StockWarning[] = [];
+      const itemsToRemove: string[] = [];
+
       results.forEach((result, idx) => {
         if (result.status === 'fulfilled') {
-          const available: number = result.value?.stock_quantity ?? Infinity;
+          const product = result.value as ApiProduct;
+          const available = product.stock_quantity ?? 0;
           const cartQty = cart[idx].quantity;
-          if (available === 0) {
-            removeFromCart(cart[idx].id);
-          } else if (cartQty > available) {
+
+          // Product is completely out of stock
+          if (available === 0 || product.stock_status === 'out_of_stock') {
+            itemsToRemove.push(cart[idx].id);
+          }
+          // Requested quantity exceeds available stock
+          else if (cartQty > available) {
             updateQuantity(cart[idx].id, available);
             warnings.push({ productId: cart[idx].id, available });
           }
         }
       });
+
+      // Remove out-of-stock items
+      itemsToRemove.forEach(id => removeFromCart(id));
       setStockWarnings(warnings);
-    } catch {
-      // non-blocking
+    } catch (err) {
+      console.error('Stock validation error:', err);
     } finally {
       setIsValidating(false);
     }
@@ -63,46 +69,15 @@ export function Cart() {
 
   useEffect(() => {
     validateCartStock();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Checkout ────────────────────────────────────────────────────────────────
-  const handleCheckout = async () => {
-    if (!token || !user) {
-      navigate('/login?redirect=/cart');
+  // ── Navigate to checkout ────────────────────────────────────────────────────
+  const handleProceedToCheckout = () => {
+    if (!token) {
+      navigate(`/login?redirect=${encodeURIComponent('/checkout')}`);
       return;
     }
-    setIsCheckingOut(true);
-    setCheckoutError(null);
-    try {
-      const response = await fetch('/api/v1/orders/checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          items: cart.map(item => ({
-            product_id: item.id,
-            quantity: item.quantity,
-          })),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        setCheckoutError(data?.message ?? data?.error ?? 'Checkout failed. Please try again.');
-        return;
-      }
-      if (data?.payment_url) {
-        window.location.href = data.payment_url;
-        return;
-      }
-      navigate('/checkout', { state: { orderData: data } });
-    } catch {
-      setCheckoutError('Network error. Please check your connection and try again.');
-    } finally {
-      setIsCheckingOut(false);
-    }
+    navigate('/checkout');
   };
 
   // ── Empty state ─────────────────────────────────────────────────────────────
@@ -127,7 +102,7 @@ export function Cart() {
     );
   }
 
-  // ── Order Summary (shared between mobile inline + desktop sidebar) ──────────
+  // ── Order Summary ──────────────────────────────────────────────────────────
   const OrderSummary = ({ className = '' }: { className?: string }) => (
     <Card className={`p-4 sm:p-6 dark:bg-gray-800 dark:border-gray-700 ${className}`}>
       <h2 className="text-lg sm:text-xl font-bold mb-4 dark:text-white">Order Summary</h2>
@@ -172,29 +147,19 @@ export function Cart() {
         </div>
       </div>
 
-      {/* Checkout error inside summary (desktop) */}
-      {checkoutError && (
-        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 p-3">
-          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-          <p className="text-red-700 dark:text-red-400 text-xs sm:text-sm">{checkoutError}</p>
-        </div>
-      )}
-
       {/* Checkout button */}
       <Button
-        onClick={handleCheckout}
-        disabled={isCheckingOut || isValidating || cart.length === 0}
+        onClick={handleProceedToCheckout}
+        disabled={isValidating || cart.length === 0}
         className="w-full bg-[#8B1538] hover:bg-[#6B0F2A] h-11 sm:h-12 text-sm sm:text-base font-bold disabled:opacity-60"
       >
-        {isCheckingOut ? (
+        {isValidating ? (
           <span className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Processing…
+            Checking stock…
           </span>
-        ) : !token ? (
-          'Sign in to Checkout'
         ) : (
-          `Checkout · ₦${total.toLocaleString()}`
+          `Proceed to Checkout · ₦${total.toLocaleString()}`
         )}
       </Button>
 
@@ -256,21 +221,8 @@ export function Cart() {
                 Some quantities were adjusted
               </p>
               <p className="text-amber-700 dark:text-amber-400 text-xs sm:text-sm">
-                One or more items had less stock than requested. Your cart has been updated.
+                One or more items had less stock than requested. Your cart has been updated to reflect current inventory levels.
               </p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Checkout error — top-level on mobile ── */}
-        {checkoutError && (
-          <div className="mb-4 sm:mb-6 lg:hidden flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 p-3 sm:p-4">
-            <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-800 dark:text-red-300 text-xs sm:text-sm mb-0.5">
-                Checkout failed
-              </p>
-              <p className="text-red-700 dark:text-red-400 text-xs sm:text-sm">{checkoutError}</p>
             </div>
           </div>
         )}
@@ -307,7 +259,7 @@ export function Cart() {
                         >
                           {item.name}
                         </Link>
-                        {/* Delete — mobile only (top right) */}
+                        {/* Delete — mobile only */}
                         <button
                           onClick={() => removeFromCart(item.id)}
                           className="sm:hidden shrink-0 p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
