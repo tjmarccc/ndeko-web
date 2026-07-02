@@ -901,11 +901,41 @@ export const getDashboard = async (): Promise<any> => {
   }
 };
 
-export const getStoreDashboard = async (storeId?: string): Promise<any> => {
+export const getTopProducts = async (
+  storeId: string,
+  limit = 5
+): Promise<ApiProduct[]> => {
+  try {
+    const response = await apiClient.get<{ data: ApiProduct[] }>(
+      `/api/v1/stores/${storeId}/products/top`,
+      {
+        params: { limit },
+      }
+    );
+
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreDashboard = async (
+  storeId?: string,
+  from?: string,
+  to?: string
+): Promise<any> => {
   try {
     const response = await apiClient.get<{ data: any }>(
-      `/api/v1/analytics/dashboard${storeId ? `?store_id=${storeId}` : ''}`
+      "/api/v1/analytics/dashboard",
+      {
+        params: {
+          store_id: storeId,
+          from,
+          to,
+        },
+      }
     );
+
     return response.data.data;
   } catch (error) {
     handleError(error);
