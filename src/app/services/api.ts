@@ -116,12 +116,14 @@ export interface AuthTokens {
 }
 
 export interface AuthResponse {
+  user: AuthUser;
+  tokens: AuthTokens;
+}
+
+interface AuthApiEnvelope {
   success: boolean;
   message: string;
-  data: {
-    user: AuthUser;
-    tokens: AuthTokens;
-  };
+  data: AuthResponse;
 }
 
 export interface AuthUser {
@@ -135,6 +137,17 @@ export interface AuthUser {
   role: 'buyer' | 'seller' | 'admin';
   is_email_verified: boolean;
   created_at: string;
+}
+
+export interface LocationStock {
+  location_id: string;
+  quantity: number;
+  // Present on the single-product detail response (GET /products/:productId) —
+  // not confirmed present on list endpoints, so keep optional.
+  branch_name?: string;
+  street?: string;
+  city?: string;
+  state?: string;
 }
 
 export interface ApiProduct {
@@ -153,6 +166,7 @@ export interface ApiProduct {
   store?: { id: string; store_name: string };
   average_rating?: number;
   review_count?: number;
+  location_stock?: LocationStock[];
   created_at: string;
 }
 
@@ -164,16 +178,89 @@ export interface ApiCategory {
   icon?: string;
 }
 
+export type OrderStatus = 'pending' | 'processing' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+export type OrderPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+export type OrderPaymentMethod = 'card' | 'bank_transfer' | 'pay_on_delivery';
+
+export interface ApiOrderItem {
+  id: string;
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  fulfillment_location_id?: string;
+  product?: { id: string; name: string; sku?: string; images?: string[] };
+  fulfillment_location?: { id: string; branch_name: string };
+}
+
+// CustomerOrder model field is `order_reference` — there is no `order_number`
+// column anywhere in the backend schema (confirmed against the Orders Module
+// reference). Buyer-facing endpoints (checkout, getMyOrders, getOrder) all
+// share this shape.
 export interface ApiOrder {
   id: string;
-  order_number: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
-  payment_status: 'pending' | 'paid' | 'failed';
-  payment_method: string;
+  order_reference: string;
+  store_id?: string;
+  status: OrderStatus;
+  payment_status: OrderPaymentStatus;
+  payment_method: OrderPaymentMethod;
   payment_url?: string;
+  payment_reference?: string;
+  subtotal?: number;
+  delivery_fee?: number;
   total_amount: number;
+  delivery_address_snapshot?: { label?: string; street?: string; city?: string; state?: string; country?: string };
   created_at: string;
-  items?: Array<{ product_name: string; quantity: number; unit_price: number }>;
+  updated_at?: string;
+  items?: ApiOrderItem[];
+}
+
+// Shape actually returned by GET /orders/stores/:storeId (getStoreOrders) —
+// a lighter-weight list projection than ApiOrder (buyer-facing endpoints),
+// using items_count instead of a full items array.
+// payment_method/payment_status are NOT confirmed present on this endpoint's
+// projection — treat as optional until the backend confirms/adds them.
+export interface StoreOrderSummary {
+  id: string;
+  order_reference: string;
+  // email not confirmed present on this endpoint's projection — optional/defensive.
+  buyer?: { id: string; first_name?: string; last_name?: string; email?: string };
+  items_count: number;
+  total_amount: number;
+  status: OrderStatus;
+  payment_status?: OrderPaymentStatus;
+  payment_method?: OrderPaymentMethod;
+  created_at: string;
+}
+
+export interface StoreOrderDetailItem {
+  id: string;
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  fulfillment_location_id?: string;
+  product?: { id: string; name: string; sku?: string; images?: string[] };
+  fulfillment_location?: { id: string; branch_name: string };
+}
+
+// Shape returned by GET /orders/stores/:storeId/:orderId (getStoreOrderDetail) —
+// full order detail, including buyer contact info and per-item fulfillment location.
+export interface StoreOrderDetail {
+  id: string;
+  order_reference: string;
+  buyer?: { id: string; first_name?: string; last_name?: string; email?: string; phone?: string };
+  items: StoreOrderDetailItem[];
+  // Part of the CustomerOrder model (delivery_address_snapshot jsonb) — not
+  // explicitly re-confirmed for this endpoint, treat as possibly absent.
+  delivery_address_snapshot?: { label?: string; street?: string; city?: string; state?: string; country?: string };
+  subtotal?: number;
+  delivery_fee?: number;
+  total_amount: number;
+  payment_method?: OrderPaymentMethod;
+  payment_status?: OrderPaymentStatus;
+  status: OrderStatus;
+  created_at: string;
 }
 
 export interface ApiAddress {
@@ -189,8 +276,10 @@ export interface ApiAddress {
 }
 
 export interface CheckoutBody {
-  items: Array<{ product_id: string; quantity: number }>;
+  // location_id is required per item — the exact branch to fulfill from, no auto-fallback.
+  items: Array<{ product_id: string; location_id: string; quantity: number }>;
   delivery_address: {
+    label?: 'home' | 'work' | 'other';
     recipient_name?: string;
     recipient_phone?: string;
     street: string;
@@ -199,6 +288,7 @@ export interface CheckoutBody {
     country?: string;
   };
   payment_method: 'card' | 'bank_transfer' | 'pay_on_delivery';
+  notes?: string;
   promo_code?: string;
 }
 
@@ -455,9 +545,12 @@ apiClient.interceptors.response.use(
 // ── Helper Functions ─────────────────────────────────────────────────────────
 function handleError(error: unknown): never {
   if (axios.isAxiosError(error)) {
-    const message = (error.response?.data as any)?.message || error.message || 'API request failed';
+    const data = error.response?.data as any;
+    // Some endpoints (e.g. checkout's INSUFFICIENT_STOCK) put the human message
+    // under `error` rather than `message` — check both before falling back.
+    const message = data?.message || data?.error || error.message || 'API request failed';
     const status = error.response?.status || 0;
-    throw new ApiError(message, status, error.response?.data);
+    throw new ApiError(message, status, data);
   }
   throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0);
 }
@@ -465,8 +558,8 @@ function handleError(error: unknown): never {
 // ── Authentication Endpoints ──────────────────────────────────────────────────
 export const loginUser = async (body: { email: string; password: string }): Promise<AuthResponse> => {
   try {
-    const response = await apiClient.post<AuthResponse>('/api/v1/auth/login', body);
-    return response.data;
+    const response = await apiClient.post<AuthApiEnvelope>('/api/v1/auth/login', body);
+    return response.data.data;
   } catch (error) {
     handleError(error);
   }
@@ -474,8 +567,8 @@ export const loginUser = async (body: { email: string; password: string }): Prom
 
 export const registerUser = async (body: RegisterBody): Promise<AuthResponse> => {
   try {
-    const response = await apiClient.post<AuthResponse>('/api/v1/auth/register', body);
-    return response.data;
+    const response = await apiClient.post<AuthApiEnvelope>('/api/v1/auth/register', body);
+    return response.data.data;
   } catch (error) {
     handleError(error);
   }
@@ -493,8 +586,8 @@ export const logoutUser = async (): Promise<void> => {
 
 export const googleAuth = async (body: { id_token: string; role?: UserRole }): Promise<AuthResponse> => {
   try {
-    const response = await apiClient.post<AuthResponse>('/api/v1/auth/google', body);
-    return response.data;
+    const response = await apiClient.post<AuthApiEnvelope>('/api/v1/auth/google', body);
+    return response.data.data;
   } catch (error) {
     handleError(error);
   }
@@ -814,11 +907,11 @@ export const fetchCategories = async (params?: { limit?: number; page?: number }
 };
 
 // ── Orders Endpoints ──────────────────────────────────────────────────────────
-export const checkout = async (data: CheckoutBody): Promise<{ orders: ApiOrder[]; payment_url?: string }> => {
+// Response `data` is an array — one order per store touched (a cart spanning
+// stores splits into multiple orders, each with its own payment_url if any).
+export const checkout = async (data: CheckoutBody): Promise<ApiOrder[]> => {
   try {
-    const response = await apiClient.post<{
-      data: { orders: ApiOrder[]; payment_url?: string };
-    }>('/api/v1/orders/checkout', data);
+    const response = await apiClient.post<{ data: ApiOrder[] }>('/api/v1/orders/checkout', data);
     return response.data.data;
   } catch (error) {
     handleError(error);
@@ -827,11 +920,18 @@ export const checkout = async (data: CheckoutBody): Promise<{ orders: ApiOrder[]
 
 export const getMyOrders = async (page = 1, limit = 20): Promise<PaginatedResponse<ApiOrder>> => {
   try {
-    const response = await apiClient.get<PaginatedResponse<ApiOrder>>(
-      '/api/v1/orders/my',
-      { params: { page, limit } }
-    );
-    return response.data;
+    // List endpoints wrap results in `meta: {page, limit, total, totalPages}`,
+    // not the flat {data, total, page, limit} shape (same fix as getStoreOrders).
+    const response = await apiClient.get<{
+      data: ApiOrder[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>('/api/v1/orders/my', { params: { page, limit } });
+    return {
+      data: response.data.data ?? [],
+      total: response.data.meta?.total ?? 0,
+      page: response.data.meta?.page ?? page,
+      limit: response.data.meta?.limit ?? limit,
+    };
   } catch (error) {
     handleError(error);
   }
@@ -927,27 +1027,85 @@ export const addProductReview = async (
 };
 
 // ── Business/Seller Endpoints ──────────────────────────────────────────────────
+
+export interface StoreDashboard {
+  scope: 'store' | 'location';
+  location_id: string | null;
+  revenue: number;
+  orders: Record<string, number>;
+  visitors: number;
+  visitors_scope: 'store';
+  active_products: number;
+}
+
+export interface RevenueSeriesPoint {
+  date: string;
+  revenue: number;
+  orders: number;
+}
+
+export interface RevenueSeries {
+  scope: 'store' | 'location';
+  location_id: string | null;
+  total_revenue: number;
+  series: RevenueSeriesPoint[];
+}
+
+export interface VisitorSeriesPoint {
+  date: string;
+  count: number;
+}
+
+export interface VisitorStats {
+  scope: 'store' | 'location';
+  location_id?: string | null;
+  total_visitors: number;
+  series: VisitorSeriesPoint[];
+}
+
 export const getDashboard = async (): Promise<any> => {
   try {
-    const response = await apiClient.get<{ data: any }>('/api/v1/analytics/dashboard');
-    return response.data.data;
+    const store = await getMyBusiness();
+    if (!store) throw new Error('No store found for this account');
+    return await getStoreDashboard(store.id);
   } catch (error) {
     handleError(error);
   }
 };
 
+export interface TopProductEntry {
+  id: string;
+  name: string;
+  sku: string;
+  price: number;
+  discount_price?: number | null;
+  stock_quantity: number;
+  stock_status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'reserved';
+  category?: string;
+  units_sold: number;
+  revenue: number;
+}
+
+export interface TopProductsResponse {
+  scope: 'store' | 'location';
+  location_id: string | null;
+  period: { from: string; to: string };
+  products: TopProductEntry[];
+}
+
+// Ranked by revenue (delivered orders only) within [from, to) — confirmed shape.
 export const getTopProducts = async (
   storeId: string,
-  limit = 5
-): Promise<ApiProduct[]> => {
+  limit = 10,
+  locationId?: string,
+  from?: string,
+  to?: string
+): Promise<TopProductsResponse> => {
   try {
-    const response = await apiClient.get<{ data: ApiProduct[] }>(
-      `/api/v1/stores/${storeId}/products/top`,
-      {
-        params: { limit },
-      }
+    const response = await apiClient.get<{ data: TopProductsResponse }>(
+      `/api/v1/analytics/stores/${storeId}/top-products`,
+      { params: { limit, location_id: locationId, from, to } }
     );
-
     return response.data.data;
   } catch (error) {
     handleError(error);
@@ -955,20 +1113,15 @@ export const getTopProducts = async (
 };
 
 export const getStoreDashboard = async (
-  storeId?: string,
+  storeId: string,
+  locationId?: string,
   from?: string,
   to?: string
-): Promise<any> => {
+): Promise<StoreDashboard> => {
   try {
-    const response = await apiClient.get<{ data: any }>(
-      "/api/v1/analytics/dashboard",
-      {
-        params: {
-          store_id: storeId,
-          from,
-          to,
-        },
-      }
+    const response = await apiClient.get<{ data: StoreDashboard }>(
+      `/api/v1/analytics/stores/${storeId}/dashboard`,
+      { params: { location_id: locationId, from, to } }
     );
 
     return response.data.data;
@@ -977,10 +1130,16 @@ export const getStoreDashboard = async (
   }
 };
 
-export const getStoreAnalytics = async (storeId?: string): Promise<any> => {
+export const getRevenueSeries = async (
+  storeId: string,
+  locationId?: string,
+  from?: string,
+  to?: string
+): Promise<RevenueSeries> => {
   try {
-    const response = await apiClient.get<{ data: any }>(
-      `/api/v1/analytics/sales${storeId ? `?store_id=${storeId}` : ''}`
+    const response = await apiClient.get<{ data: RevenueSeries }>(
+      `/api/v1/analytics/stores/${storeId}/revenue-series`,
+      { params: { location_id: locationId, from, to } }
     );
     return response.data.data;
   } catch (error) {
@@ -988,23 +1147,190 @@ export const getStoreAnalytics = async (storeId?: string): Promise<any> => {
   }
 };
 
-export const getStoreOrders = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiOrder>> => {
+export const getVisitorStats = async (
+  storeId: string,
+  locationId?: string,
+  from?: string,
+  to?: string
+): Promise<VisitorStats> => {
   try {
-    const response = await apiClient.get<PaginatedResponse<ApiOrder>>(
-      `/api/v1/stores/${storeId}/orders`,
-      { params: { page, limit } }
+    const response = await apiClient.get<{ data: VisitorStats }>(
+      `/api/v1/analytics/stores/${storeId}/visitors`,
+      { params: { location_id: locationId, from, to } }
     );
-    return response.data;
+    return response.data.data;
   } catch (error) {
     handleError(error);
   }
 };
 
-export const getStoreProducts  = async (storeId: string, page = 1, limit = 20): Promise<PaginatedResponse<ApiProduct>> => {
+export interface StoreOverview {
+  revenue: number;
+  orders: number;
+  avg_order_value: number;
+  conversion_rate: number;
+  deltas: {
+    revenue: number | null;
+    orders: number | null;
+    avg_order_value: number | null;
+    conversion_rate: number | null;
+  };
+}
+
+export const getStoreOverview = async (
+  storeId: string,
+  months = 7,
+  locationId?: string
+): Promise<StoreOverview> => {
+  try {
+    const response = await apiClient.get<{ data: StoreOverview }>(
+      `/api/v1/analytics/stores/${storeId}/overview`,
+      { params: { months, location_id: locationId } }
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export interface MonthlyRevenuePoint {
+  month: string;
+  label: string;
+  revenue: number;
+  orders: number;
+}
+
+export interface MonthlyRevenue {
+  series: MonthlyRevenuePoint[];
+  total_revenue: number;
+  total_orders: number;
+}
+
+export const getMonthlyRevenue = async (
+  storeId: string,
+  months = 7,
+  locationId?: string
+): Promise<MonthlyRevenue> => {
+  try {
+    const response = await apiClient.get<{ data: MonthlyRevenue }>(
+      `/api/v1/analytics/stores/${storeId}/monthly-revenue`,
+      { params: { months, location_id: locationId } }
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export interface SalesByCategoryEntry {
+  name: string;
+  revenue: number;
+  percentage: number;
+}
+
+export interface SalesByCategory {
+  total_revenue: number;
+  categories: SalesByCategoryEntry[];
+}
+
+export const getSalesByCategory = async (
+  storeId: string,
+  from?: string,
+  to?: string,
+  locationId?: string
+): Promise<SalesByCategory> => {
+  try {
+    const response = await apiClient.get<{ data: SalesByCategory }>(
+      `/api/v1/analytics/stores/${storeId}/sales-by-category`,
+      { params: { from, to, location_id: locationId } }
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export interface OrderStats {
+  scope: 'store' | 'location' | 'platform';
+  total: number;
+  total_revenue: number;
+  total_delivery_fees: number;
+  by_status: Record<string, number>;
+}
+
+export const getOrderStats = async (
+  storeId: string,
+  locationId?: string,
+  from?: string,
+  to?: string
+): Promise<OrderStats> => {
+  try {
+    const response = await apiClient.get<{ data: OrderStats }>(
+      '/api/v1/orders/stats',
+      { params: { store_id: storeId, location_id: locationId, from, to } }
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreOrders = async (
+  storeId: string,
+  page = 1,
+  limit = 20
+): Promise<PaginatedResponse<StoreOrderSummary>> => {
+  try {
+    // This endpoint wraps results in `meta: {page, limit, total, totalPages}`,
+    // not the flat {data, total, page, limit} shape most other list endpoints use.
+    const response = await apiClient.get<{
+      data: StoreOrderSummary[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/api/v1/orders/stores/${storeId}`, { params: { page, limit } });
+    return {
+      data: response.data.data ?? [],
+      total: response.data.meta?.total ?? 0,
+      page: response.data.meta?.page ?? page,
+      limit: response.data.meta?.limit ?? limit,
+    };
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreOrderDetail = async (storeId: string, orderId: string): Promise<StoreOrderDetail> => {
+  try {
+    const response = await apiClient.get<{ data: StoreOrderDetail }>(
+      `/api/v1/orders/stores/${storeId}/${orderId}`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export interface ProductWriteBody {
+  name?: string;
+  description?: string;
+  price?: number;
+  discount_price?: number;
+  cost_price?: number;
+  category_id?: string;
+  images?: string[];
+  is_active?: boolean;
+  stock_by_location?: LocationStock[];
+}
+
+export const getStoreProducts = async (
+  storeId: string,
+  page = 1,
+  limit = 20,
+  locationId?: string
+): Promise<PaginatedResponse<ApiProduct>> => {
   try {
     const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
-      `/api/v1/stores/${storeId}/products`,
-      { params: { page, limit } }
+      `/api/v1/products/stores/${storeId}`,
+      { params: { page, limit, location_id: locationId } }
     );
     return response.data;
   } catch (error) {
@@ -1012,10 +1338,10 @@ export const getStoreProducts  = async (storeId: string, page = 1, limit = 20): 
   }
 };
 
-export const createProduct = async (storeId: string, data: Partial<ApiProduct>): Promise<ApiProduct> => {
+export const createProduct = async (storeId: string, data: ProductWriteBody): Promise<ApiProduct> => {
   try {
     const response = await apiClient.post<{ data: ApiProduct }>(
-      `/api/v1/stores/${storeId}/products`,
+      `/api/v1/products/stores/${storeId}`,
       data
     );
     return response.data.data;
@@ -1024,10 +1350,10 @@ export const createProduct = async (storeId: string, data: Partial<ApiProduct>):
   }
 };
 
-export const updateProduct = async (storeId: string, productId: string, data: Partial<ApiProduct>): Promise<ApiProduct> => {
+export const updateProduct = async (storeId: string, productId: string, data: ProductWriteBody): Promise<ApiProduct> => {
   try {
-    const response = await apiClient.put<{ data: ApiProduct }>(
-      `/api/v1/stores/${storeId}/products/${productId}`,
+    const response = await apiClient.patch<{ data: ApiProduct }>(
+      `/api/v1/products/stores/${storeId}/${productId}`,
       data
     );
     return response.data.data;
@@ -1038,17 +1364,18 @@ export const updateProduct = async (storeId: string, productId: string, data: Pa
 
 export const deleteProduct = async (storeId: string, productId: string): Promise<any> => {
   try {
-    const response = await apiClient.delete(`/api/v1/stores/${storeId}/products/${productId}`);
+    const response = await apiClient.delete(`/api/v1/products/stores/${storeId}/${productId}`);
     return response.data;
   } catch (error) {
     handleError(error);
   }
 };
 
-export const fetchStoreProductStats = async (storeId: string): Promise<StoreProductStats> => {
+export const fetchStoreProductStats = async (storeId: string, locationId?: string): Promise<StoreProductStats> => {
   try {
     const response = await apiClient.get<{ data: StoreProductStats }>(
-      `/api/v1/stores/${storeId}/products/stats`
+      `/api/v1/products/stores/${storeId}/stats`,
+      { params: { location_id: locationId } }
     );
     return response.data.data;
   } catch (error) {
@@ -1092,6 +1419,17 @@ export const updateStore = async (storeId: string, data: Partial<ApiStore>): Pro
     const response = await apiClient.put<{ data: ApiStore }>(
       `/api/v1/stores/${storeId}`,
       data
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreLocations = async (storeId: string): Promise<ApiStoreLocation[]> => {
+  try {
+    const response = await apiClient.get<{ data: ApiStoreLocation[] }>(
+      `/api/v1/stores/${storeId}/locations`
     );
     return response.data.data;
   } catch (error) {
@@ -1250,6 +1588,8 @@ export function mapApiProduct(p: ApiProduct): any {
     brand: p.store?.store_name ?? '',
     inStock: ['in_stock', 'low_stock'].includes(p.stock_status),
     discount: discountPrice && price ? Math.round((1 - discountPrice / price) * 100) : undefined,
+    storeId: p.store?.id,
+    locationStock: p.location_stock,
   };
 }
 

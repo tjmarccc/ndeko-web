@@ -133,42 +133,64 @@ export function Checkout() {
       return;
     }
 
+    const missingLocation = cart.find((item) => !item.locationId);
+    if (missingLocation) {
+      setError(`"${missingLocation.name}" doesn't have a pickup location set — remove it and re-add it from the product page.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const body: api.CheckoutBody = {
         items: cart.map((item) => ({
           product_id: item.id,
+          location_id: item.locationId!,
           quantity: item.quantity,
         })),
         delivery_address: {
+          label: 'home',
           recipient_name: shipping.recipient_name.trim(),
           recipient_phone: shipping.recipient_phone.trim(),
           street: shipping.street.trim(),
           city: shipping.city.trim(),
           state: shipping.state.trim(),
+          country: 'Nigeria',
         },
         payment_method: payment,
         ...(promoApplied && promoKey ? { promo_code: promoKey } : {}),
       };
 
-      const response = await api.checkout(body);
+      const orders = await api.checkout(body);
+      clearCart();
 
-      if (response?.payment_url) {
-        clearCart();
-        window.location.href = response.payment_url;
+      // Multi-store carts return one order per store; redirect to the first
+      // order that needs payment (card/bank_transfer). pay_on_delivery orders
+      // have no payment_url and are already "processing".
+      const orderNeedingPayment = orders.find((o) => o.payment_url);
+      if (orderNeedingPayment?.payment_url) {
+        window.location.href = orderNeedingPayment.payment_url;
         return;
       }
 
-      const firstOrder = response?.orders?.[0];
-      clearCart();
+      const firstOrder = orders[0];
       navigate(
-        `/order-confirmation?id=${firstOrder?.order_number || firstOrder?.id || 'NDK-00000'}`,
-        { state: { orderData: response } }
+        `/order-confirmation?id=${firstOrder?.id ?? ''}`,
+        { state: { orders } }
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Checkout failed. Please try again.';
-      setError(msg);
+      if (err instanceof api.ApiError && (err.body as any)?.code === 'INSUFFICIENT_STOCK') {
+        const items = (err.body as any)?.details?.items as { productId: string; requested: number; available: number }[] | undefined;
+        const names = items?.map((i) => {
+          const match = cart.find((c) => c.id === i.productId);
+          return `${match?.name ?? 'An item'} (only ${i.available} left, ${i.requested} requested)`;
+        });
+        setError(names?.length ? `Not enough stock: ${names.join('; ')}` : 'One or more items no longer have enough stock.');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Checkout failed. Please try again.';
+        setError(msg);
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setIsSubmitting(false);
@@ -494,7 +516,13 @@ export function Checkout() {
                         />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium dark:text-white line-clamp-1">{item.name}</p>
-                          <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
+                          <p className="text-xs text-gray-400">
+                            Qty: {item.quantity}
+                            {item.locationLabel ? ` · from ${item.locationLabel}` : ''}
+                          </p>
+                          {!item.locationId && (
+                            <p className="text-xs text-red-500">No pickup location set</p>
+                          )}
                         </div>
                         <p className="text-sm font-bold text-[#8B1538] shrink-0">
                           ₦{(item.price * item.quantity).toLocaleString()}

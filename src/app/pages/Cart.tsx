@@ -17,11 +17,12 @@ interface StockWarning {
 
 // ─── CART PAGE ────────────────────────────────────────────────────────────────
 export function Cart() {
-  const { cart, removeFromCart, updateQuantity, cartTotal, clearCart } = useCart();
+  const { cart, removeFromCart, updateQuantity, setCartItemLocation, cartTotal, clearCart } = useCart();
   const { token } = useAuth();
   const navigate = useNavigate();
 
   const [stockWarnings, setStockWarnings] = useState<StockWarning[]>([]);
+  const [removedItemNames, setRemovedItemNames] = useState<string[]>([]);
   const [isValidating, setIsValidating] = useState(false);
 
   const subtotal = cartTotal;
@@ -38,34 +39,50 @@ export function Cart() {
       );
       const warnings: StockWarning[] = [];
       const itemsToRemove: string[] = [];
+      const goneNames: string[] = [];
 
       results.forEach((result, idx) => {
+        const item = cart[idx];
         if (result.status === 'fulfilled') {
           const product = result.value as ApiProduct;
           const available = product.stock_quantity ?? 0;
-          const cartQty = cart[idx].quantity;
 
           // Product is completely out of stock
           if (available === 0 || product.stock_status === 'out_of_stock') {
-            itemsToRemove.push(cart[idx].id);
+            itemsToRemove.push(item.id);
+            return;
           }
           // Requested quantity exceeds available stock
-          else if (cartQty > available) {
-            updateQuantity(cart[idx].id, available);
-            warnings.push({ productId: cart[idx].id, available });
+          if (item.quantity > available) {
+            updateQuantity(item.id, available);
+            warnings.push({ productId: item.id, available });
           }
+          // Backfill a missing location on items added before location
+          // selection existed, so they don't silently block checkout.
+          if (!item.locationId) {
+            const firstInStock = product.location_stock?.find(l => l.quantity > 0);
+            if (firstInStock) {
+              setCartItemLocation(item.id, firstInStock.location_id);
+            }
+          }
+        } else {
+          // Product no longer exists (e.g. removed, or stale cart pointing at
+          // a different/reseeded backend) — drop it rather than leaving a
+          // dead item that can never satisfy checkout.
+          itemsToRemove.push(item.id);
+          goneNames.push(item.name);
         }
       });
 
-      // Remove out-of-stock items
       itemsToRemove.forEach(id => removeFromCart(id));
       setStockWarnings(warnings);
+      setRemovedItemNames(goneNames);
     } catch (err) {
       console.error('Stock validation error:', err);
     } finally {
       setIsValidating(false);
     }
-  }, [cart, removeFromCart, updateQuantity]);
+  }, [cart, removeFromCart, updateQuantity, setCartItemLocation]);
 
   useEffect(() => {
     validateCartStock();
@@ -211,6 +228,21 @@ export function Cart() {
             )}
           </div>
         </div>
+
+        {/* ── Removed items banner ── */}
+        {removedItemNames.length > 0 && (
+          <div className="mb-4 sm:mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 p-3 sm:p-4">
+            <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-800 dark:text-red-300 text-xs sm:text-sm mb-0.5">
+                Some items were removed
+              </p>
+              <p className="text-red-700 dark:text-red-400 text-xs sm:text-sm">
+                {removedItemNames.join(', ')} {removedItemNames.length === 1 ? 'is' : 'are'} no longer available and {removedItemNames.length === 1 ? 'was' : 'were'} removed from your cart.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Stock warnings banner ── */}
         {stockWarnings.length > 0 && (

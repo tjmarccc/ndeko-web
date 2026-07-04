@@ -147,7 +147,8 @@ function DealCard({ product }: { product: Product }) {
         {/* Add to cart */}
         <button
           onClick={() => {
-            addToCart(product);
+            const firstInStock = product.locationStock?.find(l => l.quantity > 0);
+            addToCart(product, firstInStock ? { locationId: firstInStock.location_id } : undefined);
             toast.success(`${product.name} added to cart!`);
           }}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all duration-200 hover:brightness-110 active:scale-95"

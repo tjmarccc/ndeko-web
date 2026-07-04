@@ -8,7 +8,7 @@ import { getOrder, type ApiOrder } from '../services/api';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusLabel(s: ApiOrder['status']) {
-  return { pending: 'Pending', processing: 'Processing', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }[s] ?? s;
+  return { pending: 'Pending', processing: 'Processing', confirmed: 'Confirmed', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }[s] ?? s;
 }
 
 function paymentLabel(m: string) {
@@ -43,7 +43,7 @@ export function OrderConfirmation() {
       .finally(() => setLoading(false));
   }, [orderId]);
 
-  const displayRef = order?.order_number ?? (orderId || 'NDK-00000');
+  const displayRef = order?.order_reference ?? (orderId || 'NDK-00000');
 
   const handleCopy = () => {
     navigator.clipboard.writeText(displayRef).then(() => {
@@ -152,11 +152,11 @@ export function OrderConfirmation() {
                 <div className="col-span-2 bg-white dark:bg-gray-900/60 rounded-xl p-3 border dark:border-gray-700">
                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-semibold">Items Ordered</p>
                   <div className="space-y-1.5">
-                    {order.items.map((item, idx) => (
-                      <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                        <span className="truncate">{item.product_name} × {item.quantity}</span>
+                    {order.items.map((item) => (
+                      <div key={item.id} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                        <span className="truncate">{item.product?.name ?? 'Product'} × {item.quantity}</span>
                         <span className="font-semibold text-gray-800 dark:text-gray-200 ml-2">
-                          ₦{((item.unit_price ?? 0) * item.quantity).toLocaleString()}
+                          ₦{item.line_total.toLocaleString()}
                         </span>
                       </div>
                     ))}

@@ -275,7 +275,7 @@ function OrdersTab() {
               className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border dark:border-gray-700 rounded-xl gap-3 hover:border-[#8B1538]/30 transition-colors"
             >
               <div className="flex-1 min-w-0">
-                <p className="font-semibold dark:text-white text-sm truncate">{o.order_number}</p>
+                <p className="font-semibold dark:text-white text-sm truncate">{o.order_reference}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {new Date(o.created_at).toLocaleDateString('en-NG', {
                     year: 'numeric', month: 'short', day: 'numeric',

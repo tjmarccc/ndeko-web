@@ -12,7 +12,7 @@ import {
   fetchStoreReviews,
   getWalletTransactions,
   type ApiStore,
-  type ApiOrder,
+  type StoreOrderSummary,
   type ApiProduct,
   type ApiReview,
   type PaginatedResponse,
@@ -173,7 +173,7 @@ function makeId(prefix: string, entityId: string) {
 // ─── Derive notifications from API data ───────────────────────────────────────
 
 function deriveNotifications(
-  orders: ApiOrder[],
+  orders: StoreOrderSummary[],
   products: ApiProduct[],
   reviews: ApiReview[],
   wallet: WalletTx[],
@@ -182,12 +182,12 @@ function deriveNotifications(
 
   // Orders → recent status changes
   for (const o of orders) {
-    const statusMessages: Partial<Record<ApiOrder['status'], { title: string; msg: string }>> = {
-      pending: { title: 'New Order Received', msg: `Order #${o.order_number} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
-      processing: { title: 'Order in Processing', msg: `Order #${o.order_number} (₦${o.total_amount.toLocaleString()}) is being prepared.` },
-      shipped: { title: 'Order Shipped', msg: `Order #${o.order_number} has been picked up by the courier.` },
-      delivered: { title: 'Order Delivered', msg: `Order #${o.order_number} was delivered successfully.` },
-      cancelled: { title: 'Order Cancelled', msg: `Order #${o.order_number} was cancelled.` },
+    const statusMessages: Partial<Record<StoreOrderSummary['status'], { title: string; msg: string }>> = {
+      pending: { title: 'New Order Received', msg: `Order #${o.order_reference} is awaiting processing. Total: ₦${o.total_amount.toLocaleString()}` },
+      processing: { title: 'Order in Processing', msg: `Order #${o.order_reference} (₦${o.total_amount.toLocaleString()}) is being prepared.` },
+      shipped: { title: 'Order Shipped', msg: `Order #${o.order_reference} has been picked up by the courier.` },
+      delivered: { title: 'Order Delivered', msg: `Order #${o.order_reference} was delivered successfully.` },
+      cancelled: { title: 'Order Cancelled', msg: `Order #${o.order_reference} was cancelled.` },
     };
     const cfg = statusMessages[o.status];
     if (cfg) {

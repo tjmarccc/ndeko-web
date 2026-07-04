@@ -159,10 +159,12 @@ export function ForgotPassword() {
               {step === 'email' ? (
                 <form onSubmit={sendOtp} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor="reset-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       Email Address
                     </label>
                     <input
+                      id="reset-email"
+                      name="email"
                       type="email"
                       required
                       placeholder="you@example.com"
@@ -188,10 +190,12 @@ export function ForgotPassword() {
               ) : (
                 <form onSubmit={doReset} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor="reset-otp" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       6-Digit Code
                     </label>
                     <input
+                      id="reset-otp"
+                      name="otp"
                       type="text"
                       inputMode="numeric"
                       required
@@ -208,10 +212,12 @@ export function ForgotPassword() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor="reset-new-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       New Password
                     </label>
                     <input
+                      id="reset-new-password"
+                      name="newPassword"
                       type="password"
                       required
                       minLength={8}
