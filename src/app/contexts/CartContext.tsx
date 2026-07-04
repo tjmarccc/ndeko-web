@@ -4,9 +4,12 @@ import type { Product, CartItem } from '../types/product';
 // ── All methods are declared in the interface ─────────────────────────────────
 interface CartContextType {
   cart: CartItem[];
-  addToCart: (product: Product) => void;
+  addToCart: (product: Product, location?: { locationId: string; locationLabel?: string }) => void;
   removeFromCart: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
+  // Backfills a location onto an existing cart line (e.g. items added before
+  // location selection existed) without touching quantity.
+  setCartItemLocation: (productId: string, locationId: string, locationLabel?: string) => void;
   clearCart: () => void;
   cartTotal: number;
   cartCount: number;
@@ -29,17 +32,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('ndeko_cart', JSON.stringify(cart));
   }, [cart]);
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, location?: { locationId: string; locationLabel?: string }) => {
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
         return prev.map(item =>
           item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+                // A later add can supply a location where an earlier one didn't (or update it).
+                locationId: location?.locationId ?? item.locationId,
+                locationLabel: location?.locationLabel ?? item.locationLabel,
+              }
             : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, locationId: location?.locationId, locationLabel: location?.locationLabel }];
     });
   };
 
@@ -55,6 +64,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCart(prev =>
       prev.map(item =>
         item.id === productId ? { ...item, quantity } : item
+      )
+    );
+  };
+
+  const setCartItemLocation = (productId: string, locationId: string, locationLabel?: string) => {
+    setCart(prev =>
+      prev.map(item =>
+        item.id === productId ? { ...item, locationId, locationLabel } : item
       )
     );
   };
@@ -75,6 +92,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         addToCart,
         removeFromCart,
         updateQuantity,
+        setCartItemLocation,
         clearCart,
         cartTotal,
         cartCount,

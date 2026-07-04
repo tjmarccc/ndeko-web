@@ -130,6 +130,8 @@ export function ProductDetail() {
   const [wishlisted, setWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
 
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+
   const loadProduct = useCallback(async () => {
     if (!id) return;
     setLoading(true);
@@ -139,8 +141,16 @@ export function ProductDetail() {
         fetchProductById(id),
         fetchProductReviewSummary(id).catch(() => null),
       ]);
-      setProduct(mapApiProduct(raw));
+      const mapped = mapApiProduct(raw);
+      setProduct(mapped);
       setReviewSummary(summaryRes);
+
+      // location_stock on the single-product detail response already carries
+      // branch_name/street/city/state — no separate getStoreLocations call needed.
+      const inStockLocations = (mapped.locationStock ?? []).filter((l: { quantity: number }) => l.quantity > 0);
+      if (inStockLocations.length > 0) {
+        setSelectedLocationId(inStockLocations[0].location_id);
+      }
 
       if (raw.category?.slug) {
         const rel = await fetchProducts({ category: raw.category.slug, limit: 5 });
@@ -177,7 +187,14 @@ export function ProductDetail() {
 
   const handleAddToCart = () => {
     if (!product) return;
-    for (let i = 0; i < quantity; i++) addToCart(product);
+    if ((product.locationStock?.length ?? 0) > 0 && !selectedLocationId) {
+      toast.error('Please choose which location to buy from');
+      return;
+    }
+    const locationLabel = product.locationStock?.find(l => l.location_id === selectedLocationId)?.branch_name;
+    for (let i = 0; i < quantity; i++) {
+      addToCart(product, selectedLocationId ? { locationId: selectedLocationId, locationLabel } : undefined);
+    }
     toast.success(`${quantity}× ${product.name} added to cart!`);
   };
 
@@ -327,6 +344,36 @@ export function ProductDetail() {
                   </button>
                 </div>
               </div>
+
+              {(product.locationStock?.filter(l => l.quantity > 0).length ?? 0) > 1 && (
+                <div className="mb-5">
+                  <p className="text-sm font-semibold dark:text-white mb-2">Buy from</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(product.locationStock ?? [])
+                      .filter(l => l.quantity > 0)
+                      .map(l => {
+                        const active = selectedLocationId === l.location_id;
+                        return (
+                          <button
+                            key={l.location_id}
+                            type="button"
+                            onClick={() => setSelectedLocationId(l.location_id)}
+                            className={`px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${
+                              active
+                                ? 'border-[#8B1538] bg-[#8B1538]/5 text-[#8B1538]'
+                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300'
+                            }`}
+                          >
+                            <span className="block font-semibold">{l.branch_name ?? 'Branch'}</span>
+                            <span className="block text-[10px] text-gray-400">
+                              {[l.city, l.state].filter(Boolean).join(', ')}{l.city || l.state ? ' · ' : ''}{l.quantity} in stock
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-3 mb-6">
                 <Button

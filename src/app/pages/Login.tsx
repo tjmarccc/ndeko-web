@@ -243,10 +243,12 @@ export function Login() {
             {mode === 'signup' && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label htmlFor="first-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                     First Name
                   </label>
                   <input
+                    id="first-name"
+                    name="firstName"
                     type="text"
                     placeholder="First name"
                     value={form.firstName}
@@ -257,10 +259,12 @@ export function Login() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label htmlFor="last-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                     Last Name
                   </label>
                   <input
+                    id="last-name"
+                    name="lastName"
                     type="text"
                     placeholder="Last name"
                     value={form.lastName}
@@ -276,10 +280,12 @@ export function Login() {
             {/* Business name (signup + business only) */}
             {mode === 'signup' && role === 'business' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label htmlFor="business-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   Business Name
                 </label>
                 <input
+                  id="business-name"
+                  name="businessName"
                   type="text"
                   placeholder="Your store / business name"
                   value={form.businessName}
@@ -292,10 +298,12 @@ export function Login() {
 
             {/* Email */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                 Email Address
               </label>
               <input
+                id="login-email"
+                name="email"
                 type="email"
                 placeholder="you@example.com"
                 value={form.email}
@@ -310,7 +318,7 @@ export function Login() {
             {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Password
                 </label>
                 {mode === 'login' && (
@@ -321,6 +329,8 @@ export function Login() {
               </div>
               <div className="relative">
                 <input
+                  id="login-password"
+                  name="password"
                   type={showPass ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={form.password}

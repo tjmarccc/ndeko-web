@@ -24,7 +24,11 @@ export function ProductCard({ product }: ProductCardProps) {
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    addToCart(product);
+    // Quick-add from a grid card can't show a full location picker — default
+    // to the first in-stock branch. Buyers with a multi-location product can
+    // still change it from the product detail page before checkout.
+    const firstInStock = product.locationStock?.find(l => l.quantity > 0);
+    addToCart(product, firstInStock ? { locationId: firstInStock.location_id } : undefined);
     toast.success(`${product.name} added to cart`);
   };
 
