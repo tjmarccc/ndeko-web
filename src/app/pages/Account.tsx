@@ -1182,4 +1182,4 @@ export function Account() {
       </div>
     </div>
   );
-}
+};
