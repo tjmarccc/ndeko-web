@@ -1,9 +1,9 @@
-import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://ndeko-backend-dev.onrender.com';
 const REQUEST_TIMEOUT_MS = 15000;
 
-export type UploadContext = 'product' | 'store-logo' | 'store-banner' | 'profile-avatar';
+export type UploadContext = 'product' | 'store-logo' | 'store-banner' | 'avatar';
 
 // ── Session Expiry Event ──────────────────────────────────────────────────────
 // export const SESSION_EXPIRED_EVENT = 'session_expired';
@@ -82,7 +82,7 @@ export const tokenStore = {
 };
 
 export const SESSION_EXPIRED_EVENT = 'ndeko:session_expired';
-function dispatchSessionExpired() {
+export function dispatchSessionExpired() {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 }
 
@@ -491,7 +491,7 @@ apiClient.interceptors.response.use(
           })
           .catch((err) => {
             tokenStore.clear();
-            window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+            dispatchSessionExpired();
             return Promise.reject(err);
           });
       }
@@ -528,14 +528,14 @@ apiClient.interceptors.response.use(
         processQueue(err, null);
         isRefreshing = false;
         tokenStore.clear();
-        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+        dispatchSessionExpired();
         return Promise.reject(err);
       }
     }
 
     if (error.response?.status === 403) {
       tokenStore.clear();
-      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+      dispatchSessionExpired();
     }
 
     return Promise.reject(error);
@@ -1461,17 +1461,51 @@ export const updateStoreLocation = async (storeId: string, locationId: string, d
   }
 };
 
+const UPLOAD_TIMEOUT_MS = 60000;
+
+interface UploadSignature {
+  signature: string;
+  timestamp: number;
+  api_key: string;
+  cloud_name: string;
+  folder: string;
+}
+
+// Two-step direct upload: get a signed payload from our backend, then send the
+// file straight to Cloudinary so large files never transit our server.
 export const uploadImage = async (file: File, context: UploadContext): Promise<{ url: string }> => {
+  let sig: UploadSignature;
   try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('context', context);
-    const response = await apiClient.post<{ data: { url: string } }>('/api/v1/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data.data;
+    const response = await apiClient.post<{ data: UploadSignature }>(
+      `/api/v1/uploads/signature?context=${encodeURIComponent(context)}`
+    );
+    sig = response.data.data;
   } catch (error) {
     handleError(error);
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('signature', sig.signature);
+  formData.append('timestamp', String(sig.timestamp));
+  formData.append('api_key', sig.api_key);
+  formData.append('folder', sig.folder);
+
+  try {
+    // Plain axios (not apiClient): no Bearer token or refresh interceptors on
+    // the cross-origin Cloudinary call.
+    const response = await axios.post<{ secure_url: string }>(
+      `https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,
+      formData,
+      { timeout: UPLOAD_TIMEOUT_MS }
+    );
+    return { url: response.data.secure_url };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data as { error?: { message?: string } } | undefined;
+      throw new ApiError(data?.error?.message || 'Image upload failed', error.response?.status || 0, data);
+    }
+    throw new ApiError(error instanceof Error ? error.message : 'Image upload failed', 0);
   }
 };
 
@@ -1531,7 +1565,7 @@ export const getWalletTransactions = async (
   } catch (error) {
     handleError(error);
   }
-}; 
+};
 
 
 
