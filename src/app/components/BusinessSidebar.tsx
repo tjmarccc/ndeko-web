@@ -15,7 +15,7 @@ import {
   Star,
   Truck,
 } from 'lucide-react';
-import { cn } from '../../components/ui/utils';
+import { cn } from './ui/utils';
 
 interface NavItem {
   label: string;

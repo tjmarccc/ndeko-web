@@ -1,13 +1,12 @@
-import { useState, useEffect } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router';
+import { useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Package, ShoppingBag, Store, BarChart3,
   Bell, ChevronDown, Menu, X, LogOut, Settings, ChevronRight,
   Search, Home, Users, ShoppingCart, Heart,
 } from 'lucide-react';
-import { NdekoLogo } from './NdekoLogo';
+import { NdekoLogo } from '../components/NdekoLogo';
 import { useAuth } from '../contexts/AuthContext';
-import { getMyBusiness } from '../services/api';
 
 const navItems = [
   { label: 'Dashboard', path: '/business', icon: LayoutDashboard },
@@ -23,36 +22,17 @@ const bottomNavItems = [
   { label: 'Settings', path: '/business/settings', icon: Settings },
 ];
 
-export function BusinessLayout() {
+interface BusinessLayoutProps {
+  children?: React.ReactNode;
+}
+
+export function BusinessLayout({ children }: BusinessLayoutProps = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [businessName, setBusinessName] = useState<string | null>(null);
-
-  useEffect(() => {
-    getMyBusiness()
-      .then((b) => setBusinessName(b.business_name))
-      .catch(() => {});
-  }, []);
-
-  const personalName = user
-    ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email
-    : '—';
-  const displayName = businessName ?? personalName;
-  const initials = displayName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('') || '?';
-
-  const handleSignOut = async () => {
-    setProfileOpen(false);
-    await logout();
-    navigate('/login');
-  };
 
   const activePath = location.pathname;
 
@@ -68,8 +48,22 @@ export function BusinessLayout() {
     }
   };
 
+  const handleSignOut = async () => {
+    setProfileOpen(false);
+    setSidebarOpen(false);
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
   const isActive = (path: string) =>
     path === '/business' ? activePath === '/business' : activePath.startsWith(path);
+
+  const displayName = user
+    ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email
+    : '—';
+  const initials = user
+    ? `${(user.first_name?.[0] ?? '')}${(user.last_name?.[0] ?? '')}`.toUpperCase() || '?'
+    : '?';
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#F8F3F5', fontFamily: 'Inter, sans-serif' }}>
@@ -393,6 +387,7 @@ export function BusinessLayout() {
             </h1>
           </div>
 
+          {children}
           <Outlet />
         </main>
       </div>
