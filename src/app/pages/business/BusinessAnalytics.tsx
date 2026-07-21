@@ -1,351 +1,389 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
 } from 'recharts';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import {
-  TrendingUp, TrendingDown, ShoppingBag, BarChart3, Percent,
-  RefreshCw, AlertCircle,
-} from 'lucide-react';
-import {
-  getMyBusiness,
-  getStoreOverview,
-  getMonthlyRevenue,
-  getSalesByCategory,
-  getTopProducts,
-  type ApiStore,
-  type StoreOverview,
-  type MonthlyRevenue,
-  type SalesByCategory,
-  type TopProductEntry,
-} from '../../services/api';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
 
-const MONTHS_WINDOW = 7;
-const CATEGORY_COLORS = ['#8B1538', '#D4828F', '#3D9B8E', '#6366F1', '#F59E0B', '#9CA3AF'];
-const TOP_PRODUCT_COLORS = ['#8B1538', '#D4828F', '#3D9B8E'];
+const revenueData = [
+  { month: 'Nov', revenue: 1200000, target: 1100000 },
+  { month: 'Dec', revenue: 1900000, target: 1200000 },
+  { month: 'Jan', revenue: 1100000, target: 1300000 },
+  { month: 'Feb', revenue: 1500000, target: 1400000 },
+  { month: 'Mar', revenue: 1300000, target: 1500000 },
+  { month: 'Apr', revenue: 1600000, target: 1600000 },
+  { month: 'May', revenue: 1800000, target: 1700000 },
+];
 
-function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
+const monthlyOrders = [
+  { month: 'Nov', orders: 45 },
+  { month: 'Dec', orders: 52 },
+  { month: 'Jan', orders: 48 },
+  { month: 'Feb', orders: 61 },
+  { month: 'Mar', orders: 55 },
+  { month: 'Apr', orders: 67 },
+  { month: 'May', orders: 73 },
+];
 
-function fmt(n: number) {
-  if (n >= 1_000_000) return `₦${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `₦${(n / 1_000).toFixed(0)}K`;
-  return `₦${n.toLocaleString()}`;
-}
+const categoryData = [
+  { name: 'Electronics', value: 45, fill: '#0D9488' },
+  { name: 'Fashion', value: 28, fill: '#E91E63' },
+  { name: 'Beauty', value: 14, fill: '#A81E54' },
+  { name: 'Home & Kitchen', value: 8, fill: '#F59E0B' },
+  { name: 'Sports', value: 5, fill: '#3B82F6' },
+];
 
-function KpiCard({
-  label, value, change, icon: Icon, color,
+const topProducts = [
+  { name: 'Samsung S24 Ultra', revenue: 4500000 },
+  { name: 'MacBook Pro M3', revenue: 4200000 },
+  { name: 'WH-1000XM5', revenue: 2100000 },
+  { name: 'Ankara Print Dress', revenue: 850000 },
+  { name: 'Air Fryer Pro 5L', revenue: 720000 },
+];
+
+const trafficSources = [
+  { source: 'Ndeko Search', visits: 6420, percentage: 50 },
+  { source: 'Direct Link', visits: 2568, percentage: 20 },
+  { source: 'Social Media', visits: 1928, percentage: 15 },
+  { source: 'Flash Deals', visits: 1284, percentage: 10 },
+  { source: 'Other', visits: 642, percentage: 5 },
+];
+
+function MetricBox({
+  label,
+  value,
+  change,
+  isPositive,
 }: {
-  label: string; value: string; change: number | null;
-  icon: React.ElementType; color: string;
+  label: string;
+  value: string | number;
+  change: string;
+  isPositive: boolean;
 }) {
   return (
-    <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 flex flex-col gap-3">
-      <div className="flex items-start justify-between">
-        <div className="p-2 sm:p-2.5 rounded-xl" style={{ background: `${color}18` }}>
-          <Icon className="h-4 w-4 sm:h-5 sm:w-5" style={{ color }} />
-        </div>
-        {change !== null && (
-          <span
-            className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full"
-            style={{ background: change >= 0 ? '#D1FAE5' : '#FEE2E2', color: change >= 0 ? '#059669' : '#DC2626' }}
-          >
-            {change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {change >= 0 ? '+' : ''}{change.toFixed(1)}%
-          </span>
-        )}
-      </div>
-      <div>
-        <p className="text-gray-500 text-xs font-medium mb-1 leading-snug">{label}</p>
-        <p className="text-gray-900 font-bold text-xl sm:text-2xl leading-none">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="flex items-center gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
-      <AlertCircle className="h-4 w-4 flex-shrink-0" />
-      <span className="flex-1">{message}</span>
-      <button
-        onClick={onRetry}
-        className="flex items-center gap-1.5 text-xs font-semibold bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors"
-      >
-        <RefreshCw className="h-3 w-3" /> Retry
-      </button>
-    </div>
-  );
-}
-
-const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
-  if (percent < 0.06) return null;
-  const RADIAN = Math.PI / 180;
-  const r = innerRadius + (outerRadius - innerRadius) * 0.55;
-  const x = cx + r * Math.cos(-midAngle * RADIAN);
-  const y = cy + r * Math.sin(-midAngle * RADIAN);
-  return (
-    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-};
-
-export function BusinessAnalytics() {
-  const [store, setStore] = useState<ApiStore | null>(null);
-  const [overview, setOverview] = useState<StoreOverview | null>(null);
-  const [monthlyRevenue, setMonthlyRevenue] = useState<MonthlyRevenue | null>(null);
-  const [salesByCategory, setSalesByCategory] = useState<SalesByCategory | null>(null);
-  const [topProducts, setTopProducts] = useState<TopProductEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const myStore = store ?? await getMyBusiness();
-      if (!myStore) throw new Error('No store found for this account.');
-      if (!store) setStore(myStore);
-
-      const today = new Date();
-      const from = new Date(today.getFullYear(), today.getMonth() - (MONTHS_WINDOW - 1), 1);
-
-      const [overviewRes, monthlyRes, categoryRes, topProductsRes] = await Promise.all([
-        getStoreOverview(myStore.id, MONTHS_WINDOW),
-        getMonthlyRevenue(myStore.id, MONTHS_WINDOW),
-        getSalesByCategory(myStore.id, toISODate(from), toISODate(today)),
-        getTopProducts(myStore.id, 5, undefined, toISODate(from), toISODate(today)),
-      ]);
-
-      setOverview(overviewRes);
-      setMonthlyRevenue(monthlyRes);
-      setSalesByCategory(categoryRes);
-      setTopProducts(topProductsRes.products);
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to load analytics data');
-    } finally {
-      setLoading(false);
-    }
-  }, [store]);
-
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
-        <RefreshCw className="h-5 w-5 animate-spin" />
-        <span className="text-sm">Loading analytics…</span>
-      </div>
-    );
-  }
-
-  const categoryData = (salesByCategory?.categories ?? []).map((c, i) => ({
-    name: c.name,
-    value: c.percentage,
-    revenue: c.revenue,
-    color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-  }));
-
-  return (
-    <div className="space-y-4 sm:space-y-6 w-full min-w-0">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-gray-900 font-bold text-lg sm:text-xl">Analytics</h2>
-          <p className="text-gray-400 text-xs mt-0.5">{store?.store_name}</p>
-        </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Refresh</span>
-        </button>
-      </div>
-
-      {error && <ErrorBanner message={error} onRetry={load} />}
-
-      {overview && (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-          <KpiCard
-            label={`Total Revenue (${MONTHS_WINDOW} months)`}
-            value={fmt(overview.revenue)}
-            change={overview.deltas.revenue}
-            icon={TrendingUp}
-            color="#8B1538"
-          />
-          <KpiCard
-            label="Total Orders"
-            value={overview.orders.toLocaleString()}
-            change={overview.deltas.orders}
-            icon={ShoppingBag}
-            color="#3D9B8E"
-          />
-          <KpiCard
-            label="Avg Order Value"
-            value={fmt(overview.avg_order_value)}
-            change={overview.deltas.avg_order_value}
-            icon={BarChart3}
-            color="#D4828F"
-          />
-          <KpiCard
-            label="Conversion Rate"
-            value={`${overview.conversion_rate.toFixed(1)}%`}
-            change={overview.deltas.conversion_rate}
-            icon={Percent}
-            color="#6366F1"
-          />
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-5">
-        <div className="lg:col-span-3 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 min-w-0">
-          <h3 className="text-gray-800 font-bold text-sm sm:text-base">Monthly Revenue</h3>
-          <p className="text-gray-400 text-xs mt-0.5 mb-4">Last {MONTHS_WINDOW} months</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={monthlyRevenue?.series ?? []} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="monthlyRevGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8B1538" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#8B1538" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} tickFormatter={fmt} width={54} />
-              <Tooltip formatter={(v: number) => [fmt(v), 'Revenue']} contentStyle={{ borderRadius: 12, border: '1px solid #F3F4F6', fontSize: 12 }} />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-              <Area type="monotone" dataKey="revenue" stroke="#8B1538" strokeWidth={2.5} fill="url(#monthlyRevGrad)" dot={{ r: 4, fill: '#8B1538', strokeWidth: 0 }} name="revenue" />
-            </AreaChart>
-          </ResponsiveContainer>
-
-          <div className="mt-4 pt-4 border-t border-gray-50">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Monthly Orders</p>
-            <ResponsiveContainer width="100%" height={100}>
-              <BarChart data={monthlyRevenue?.series ?? []} margin={{ top: 0, right: 5, bottom: 0, left: 0 }}>
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 9, fill: '#9CA3AF' }} axisLine={false} tickLine={false} width={28} />
-                <Tooltip formatter={(v: number) => [v, 'Orders']} contentStyle={{ borderRadius: 10, fontSize: 11 }} />
-                <Bar dataKey="orders" radius={[4, 4, 0, 0]} fill="#3D9B8E" opacity={0.85} name="orders" />
-              </BarChart>
-            </ResponsiveContainer>
+    <Card className="border-0 shadow-md hover:shadow-lg transition-shadow">
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <p className="text-gray-600 text-sm font-medium">{label}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
           </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 min-w-0">
-          <h3 className="text-gray-800 font-bold text-sm sm:text-base mb-4">Sales by Category</h3>
-          {categoryData.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center text-gray-400 gap-2 py-10">
-              <p className="text-xs">No delivered orders in this period yet.</p>
+          {isPositive ? (
+            <div className="p-2 bg-green-100 rounded-lg">
+              <TrendingUp size={18} className="text-green-600" />
             </div>
           ) : (
-            <>
-              <ResponsiveContainer width="100%" height={180}>
+            <div className="p-2 bg-red-100 rounded-lg">
+              <TrendingDown size={18} className="text-red-600" />
+            </div>
+          )}
+        </div>
+        <p
+          className={`text-sm font-semibold ${
+            isPositive ? 'text-green-600' : 'text-red-600'
+          }`}
+        >
+          {change}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function BusinessAnalytics() {
+  const [timeRange, setTimeRange] = useState('7d');
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="sticky top-0 z-20 bg-white border-b border-gray-200 px-6 py-4 lg:ml-64">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Analytics</h1>
+            <p className="text-gray-600 text-sm mt-1">Last 7 months</p>
+          </div>
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Select period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7d">Last 7 Days</SelectItem>
+              <SelectItem value="30d">Last 30 Days</SelectItem>
+              <SelectItem value="90d">Last 90 Days</SelectItem>
+              <SelectItem value="1y">Last Year</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="p-6 lg:ml-64 space-y-6">
+        {/* Key Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricBox
+            label="Total Revenue (7 months)"
+            value="₦24.9M"
+            change="+18%"
+            isPositive={true}
+          />
+          <MetricBox
+            label="Total Orders"
+            value="766"
+            change="+12%"
+            isPositive={true}
+          />
+          <MetricBox
+            label="Avg Order Value"
+            value="₦32,572"
+            change="-0.4%"
+            isPositive={false}
+          />
+          <MetricBox
+            label="Conversion Rate"
+            value="3.2%"
+            change="-0.4%"
+            isPositive={false}
+          />
+        </div>
+
+        {/* Charts Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Monthly Revenue Chart */}
+          <div className="lg:col-span-2">
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-200">
+                <CardTitle className="text-lg">Monthly Revenue</CardTitle>
+                <p className="text-xs text-gray-500 mt-1">Last 7 months</p>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={revenueData}>
+                    <defs>
+                      <linearGradient
+                        id="colorRevenue"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop offset="5%" stopColor="#E91E63" stopOpacity={0.3} />
+                        <stop
+                          offset="95%"
+                          stopColor="#E91E63"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#E5E7EB"
+                      vertical={false}
+                    />
+                    <XAxis dataKey="month" stroke="#9CA3AF" style={{ fontSize: 12 }} />
+                    <YAxis stroke="#9CA3AF" style={{ fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1F2937',
+                        border: 'none',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                      }}
+                      labelStyle={{ color: '#FFF' }}
+                      formatter={(value: any) =>
+                        `₦${(value / 1000000).toFixed(1)}M`
+                      }
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="#A81E54"
+                      strokeWidth={3}
+                      dot={{ fill: '#A81E54', r: 5 }}
+                      activeDot={{ r: 7 }}
+                      fillOpacity={1}
+                      fill="url(#colorRevenue)"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Sales by Category */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-200">
+              <CardTitle className="text-lg">Sales by Category</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 flex justify-center items-center">
+              <ResponsiveContainer width="100%" height={250}>
                 <PieChart>
                   <Pie
                     data={categoryData}
                     cx="50%"
                     cy="50%"
-                    labelLine={false}
-                    label={renderCustomLabel}
-                    outerRadius={80}
-                    innerRadius={32}
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
                     dataKey="value"
                   >
                     {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(_value, _name, item) => [fmt(item.payload.revenue), item.payload.name]} contentStyle={{ borderRadius: 12, fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1F2937',
+                      border: 'none',
+                      borderRadius: '8px',
+                    }}
+                    labelStyle={{ color: '#FFF' }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="space-y-2 mt-2">
-                {categoryData.map((c) => (
-                  <div key={c.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                      <span className="text-xs text-gray-600 truncate">{c.name}</span>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Monthly Orders & Top Products */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Monthly Orders */}
+          <Card className="lg:col-span-2 border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-200">
+              <CardTitle className="text-lg">Monthly Orders</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={monthlyOrders}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#E5E7EB"
+                    vertical={false}
+                  />
+                  <XAxis dataKey="month" stroke="#9CA3AF" style={{ fontSize: 12 }} />
+                  <YAxis stroke="#9CA3AF" style={{ fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1F2937',
+                      border: 'none',
+                      borderRadius: '8px',
+                    }}
+                    labelStyle={{ color: '#FFF' }}
+                  />
+                  <Bar dataKey="orders" fill="#0D9488" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Category Legend */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-200">
+              <CardTitle className="text-lg">Category Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-3">
+                {categoryData.map((category) => (
+                  <div key={category.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: category.fill }}
+                      />
+                      <span className="text-sm text-gray-700">{category.name}</span>
                     </div>
-                    <span className="text-xs font-semibold text-gray-700 flex-shrink-0 ml-2">{c.value}%</span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {category.value}%
+                    </span>
                   </div>
                 ))}
               </div>
-            </>
-          )}
+            </CardContent>
+          </Card>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-5">
-        <div className="lg:col-span-3 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 min-w-0">
-          <h3 className="text-gray-800 font-bold text-sm sm:text-base mb-4">Top Products by Revenue</h3>
-          {topProducts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center text-gray-400 gap-2 py-10">
-              <p className="text-xs">No product sales in this period yet.</p>
+        {/* Top Products */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="border-b border-gray-200">
+            <CardTitle className="text-lg">Top Products by Revenue</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              {topProducts.map((product, index) => {
+                const maxRevenue = topProducts[0].revenue;
+                const percentage = (product.revenue / maxRevenue) * 100;
+
+                return (
+                  <div key={product.name} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-900">
+                        {product.name}
+                      </span>
+                      <span className="text-sm font-semibold text-gray-900">
+                        ₦{(product.revenue / 1000000).toFixed(2)}M
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-[#A81E54] to-[#E91E63] rounded-full"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={Math.max(180, topProducts.length * 56)}>
-                <BarChart
-                  data={topProducts.map(p => ({ name: p.name, revenue: p.revenue, units_sold: p.units_sold, stock_status: p.stock_status }))}
-                  layout="vertical"
-                  margin={{ top: 0, right: 12, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={fmt}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tick={{ fontSize: 11, fill: '#6B7280' }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={110}
-                  />
-                  <Tooltip
-                    formatter={(v: number, _name, item) => [
-                      `${fmt(v)} · ${item.payload.units_sold} sold${item.payload.stock_status === 'out_of_stock' ? ' · out of stock' : ''}`,
-                      'Revenue',
-                    ]}
-                    contentStyle={{ borderRadius: 12, border: '1px solid #F3F4F6', fontSize: 12 }}
-                  />
-                  <Bar dataKey="revenue" radius={[0, 8, 8, 0]} barSize={28}>
-                    {topProducts.map((p, i) => (
-                      <Cell key={i} fill={p.stock_status === 'out_of_stock' ? '#DC2626' : TOP_PRODUCT_COLORS[i] ?? '#9CA3AF'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+          </CardContent>
+        </Card>
 
-              {topProducts.some(p => p.stock_status === 'out_of_stock') && (
-                <p className="text-xs text-red-600 mt-3 flex items-start gap-1.5">
-                  <span>⚠️</span>
-                  <span>
-                    {topProducts.filter(p => p.stock_status === 'out_of_stock').map(p => p.name).join(', ')} {topProducts.filter(p => p.stock_status === 'out_of_stock').length === 1 ? 'is' : 'are'} a top seller but currently out of stock — consider restocking.
-                  </span>
-                </p>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="lg:col-span-2 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 min-w-0 flex flex-col">
-          <h3 className="text-gray-800 font-bold text-sm sm:text-base mb-4">Traffic Sources</h3>
-          <div className="flex-1 flex flex-col items-center justify-center text-center text-gray-400 gap-2 py-6">
-            <p className="text-xs max-w-[220px]">
-              Not available yet — no endpoint returns visits broken down by referral source.
-            </p>
-          </div>
-        </div>
+        {/* Traffic Sources */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="border-b border-gray-200">
+            <CardTitle className="text-lg">Traffic Sources</CardTitle>
+            <p className="text-xs text-gray-500 mt-1">This week's orders</p>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              {trafficSources.map((source) => (
+                <div key={source.source} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-900">
+                      {source.source}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {source.visits.toLocaleString()} visits • {source.percentage}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#A81E54] to-[#E91E63]"
+                      style={{ width: `${source.percentage * 5}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
-
-export default BusinessAnalytics;

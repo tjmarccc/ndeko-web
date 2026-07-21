@@ -28,6 +28,8 @@ import { BusinessStorefront } from './pages/business/BusinessStorefront';
 import { BusinessAnalytics } from './pages/business/BusinessAnalytics';
 import { BusinessSettings } from './pages/business/BusinessSettings';
 import { BusinessNotifications } from './pages/business/BusinessNotifications';
+import { BusinessReviews } from './pages/business/Businessreviews';
+import { BusinessLogistics } from './pages/business/Businesslogistics';
 
 // Contexts
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -290,6 +292,24 @@ const businessRoutes: RouteObject[] = [
             errorElement: (
               <div className="p-6">
                 <p className="text-red-600 dark:text-red-400">Failed to load analytics</p>
+              </div>
+            ),
+          },
+          {
+            path: 'reviews',
+            Component: BusinessReviews,
+            errorElement: (
+              <div className="p-6">
+                <p className="text-red-600 dark:text-red-400">Failed to load reviews</p>
+              </div>
+            ),
+          },
+          {
+            path: 'logistics',
+            Component: BusinessLogistics,
+            errorElement: (
+              <div className="p-6">
+                <p className="text-red-600 dark:text-red-400">Failed to load logistics</p>
               </div>
             ),
           },
