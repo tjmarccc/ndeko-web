@@ -5,7 +5,7 @@ import {
   Bell, ChevronDown, Menu, X, LogOut, Settings, ChevronRight,
   Search, Home, Users, ShoppingCart, Heart,
 } from 'lucide-react';
-import { NdekoLogo } from '../components/NdekoLogo';
+import { NdekoLogo } from './NdekoLogo';
 import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
