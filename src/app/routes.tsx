@@ -28,8 +28,8 @@ import { BusinessStorefront } from './pages/business/BusinessStorefront';
 import { BusinessAnalytics } from './pages/business/BusinessAnalytics';
 import { BusinessSettings } from './pages/business/BusinessSettings';
 import { BusinessNotifications } from './pages/business/BusinessNotifications';
-import { BusinessReviews } from './pages/business/Businessreviews';
-import { BusinessLogistics } from './pages/business/Businesslogistics';
+import { BusinessReviews } from './pages/business/BusinessReviews';
+import { BusinessLogistics } from './pages/business/BusinessLogistics';
 
 // Contexts
 import { AuthProvider, useAuth } from './contexts/AuthContext';
