@@ -9,10 +9,12 @@ import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { useState, useEffect, useCallback } from 'react';
 import { fetchProductById, type ApiProduct } from '../services/api';
+import { toast } from 'sonner';
 
-interface StockWarning {
+interface StockInfo {
   productId: string;
   available: number;
+  warning: boolean;
 }
 
 // ─── CART PAGE ────────────────────────────────────────────────────────────────
@@ -21,7 +23,7 @@ export function Cart() {
   const { token } = useAuth();
   const navigate = useNavigate();
 
-  const [stockWarnings, setStockWarnings] = useState<StockWarning[]>([]);
+  const [stockInfo, setStockInfo] = useState<Map<string, StockInfo>>(new Map());
   const [removedItemNames, setRemovedItemNames] = useState<string[]>([]);
   const [isValidating, setIsValidating] = useState(false);
 
@@ -37,7 +39,7 @@ export function Cart() {
       const results = await Promise.allSettled(
         cart.map(item => fetchProductById(item.id))
       );
-      const warnings: StockWarning[] = [];
+      const infoMap = new Map<string, StockInfo>();
       const itemsToRemove: string[] = [];
       const goneNames: string[] = [];
 
@@ -52,11 +54,16 @@ export function Cart() {
             itemsToRemove.push(item.id);
             return;
           }
-          // Requested quantity exceeds available stock
-          if (item.quantity > available) {
+
+          // Check if requested quantity exceeds available stock
+          const exceedsStock = item.quantity > available;
+          if (exceedsStock) {
             updateQuantity(item.id, available);
-            warnings.push({ productId: item.id, available });
+            infoMap.set(item.id, { productId: item.id, available, warning: true });
+          } else {
+            infoMap.set(item.id, { productId: item.id, available, warning: false });
           }
+
           // Backfill a missing location on items added before location
           // selection existed, so they don't silently block checkout.
           if (!item.locationId) {
@@ -75,7 +82,7 @@ export function Cart() {
       });
 
       itemsToRemove.forEach(id => removeFromCart(id));
-      setStockWarnings(warnings);
+      setStockInfo(infoMap);
       setRemovedItemNames(goneNames);
     } catch (err) {
       console.error('Stock validation error:', err);
@@ -86,7 +93,31 @@ export function Cart() {
 
   useEffect(() => {
     validateCartStock();
-  }, []);
+  }, [validateCartStock]);
+
+  // ── Handle quantity change with validation ──────────────────────────────────
+  const handleQuantityChange = (itemId: string, newQuantity: number) => {
+    const item = cart.find(i => i.id === itemId);
+    if (!item) return;
+
+    const stockData = stockInfo.get(itemId);
+    const itemStock = typeof item.inStock === 'number' ? item.inStock : 0;
+    const maxAvailable = stockData?.available || itemStock || 0;
+
+    // Validate quantity
+    if (newQuantity < 1) {
+      removeFromCart(itemId);
+      toast.success('Item removed from cart');
+      return;
+    }
+
+    if (newQuantity > maxAvailable) {
+      toast.error(`Only ${maxAvailable} item${maxAvailable !== 1 ? 's' : ''} available in stock`);
+      return;
+    }
+
+    updateQuantity(itemId, newQuantity);
+  };
 
   // ── Navigate to checkout ────────────────────────────────────────────────────
   const handleProceedToCheckout = () => {
@@ -244,28 +275,16 @@ export function Cart() {
           </div>
         )}
 
-        {/* ── Stock warnings banner ── */}
-        {stockWarnings.length > 0 && (
-          <div className="mb-4 sm:mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3 sm:p-4">
-            <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-amber-800 dark:text-amber-300 text-xs sm:text-sm mb-0.5">
-                Some quantities were adjusted
-              </p>
-              <p className="text-amber-700 dark:text-amber-400 text-xs sm:text-sm">
-                One or more items had less stock than requested. Your cart has been updated to reflect current inventory levels.
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* ── Body: items + summary ── */}
         <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
 
           {/* Cart items */}
           <div className="lg:col-span-2 space-y-3 sm:space-y-4">
             {cart.map(item => {
-              const warning = stockWarnings.find(w => w.productId === item.id);
+              const stockData = stockInfo.get(item.id);
+              const itemStock = typeof item.inStock === 'number' ? item.inStock : 0;
+              const maxAvailable: number = (stockData?.available) ?? itemStock;
+
               return (
                 <Card
                   key={item.id}
@@ -309,11 +328,23 @@ export function Cart() {
                       )}
 
                       {/* Stock warning */}
-                      {warning && (
-                        <p className="text-amber-600 dark:text-amber-400 text-xs mb-2">
-                          ⚠️ Only {warning.available} left — quantity adjusted.
+                      {stockData?.warning && (
+                        <p className="text-amber-600 dark:text-amber-400 text-xs mb-2 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          Only {maxAvailable} left — quantity adjusted to match available stock.
                         </p>
                       )}
+
+                      {/* Stock availability */}
+                      <p className={`text-xs mb-2 font-medium ${
+                        maxAvailable === 0 
+                          ? 'text-red-600 dark:text-red-400' 
+                          : maxAvailable < 5 
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-green-600 dark:text-green-400'
+                      }`}>
+                        {maxAvailable === 0 ? '❌ Out of stock' : maxAvailable < 5 ? `⚠️ ${maxAvailable} left` : `✓ ${maxAvailable} in stock`}
+                      </p>
 
                       {/* Quantity stepper + price + desktop delete */}
                       <div className="flex items-center justify-between gap-2 flex-wrap mt-2">
@@ -321,7 +352,7 @@ export function Cart() {
                         {/* Stepper */}
                         <div className="flex items-center border dark:border-gray-600 rounded-xl overflow-hidden h-8 sm:h-9">
                           <button
-                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                            onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
                             className="h-full px-3 text-lg font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-40"
                             aria-label="Decrease quantity"
                             disabled={item.quantity <= 1}
@@ -332,9 +363,10 @@ export function Cart() {
                             {item.quantity}
                           </span>
                           <button
-                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                            className="h-full px-3 text-lg font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                            className="h-full px-3 text-lg font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-40"
                             aria-label="Increase quantity"
+                            disabled={item.quantity >= maxAvailable}
                           >
                             +
                           </button>

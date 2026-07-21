@@ -1,231 +1,282 @@
-import { useParams, Link } from 'react-router';
+import { useParams, useNavigate } from 'react-router';
 import {
-  ShoppingCart, Heart, Star, Truck, Shield, ArrowLeft,
-  Loader2, AlertCircle, RefreshCw, User, Check, MessageSquare,
+  Heart, Share2, ArrowLeft, Loader2, AlertCircle,
+  ShoppingCart, Star, ChevronLeft, ChevronRight, MapPin, Package, Truck
 } from 'lucide-react';
-import { ProductCard } from '../components/ProductCard';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
+import { Card } from '../components/ui/card';
 import { useCart } from '../contexts/CartContext';
-import { toast } from 'sonner';
-import { useState, useEffect, useCallback } from 'react';
-import {
-  fetchProducts, fetchProductById, fetchProductReviews, fetchProductReviewSummary,
-  addProductReview, addToWishlist, removeFromWishlist, mapApiProduct,
-  tokenStore, ApiError,
-  type ApiReview, type ReviewSummary,
-} from '../services/api';
+import { fetchProductById, mapApiProduct, type ApiProduct } from '../services/api';
 import type { Product } from '../types/product';
+import { toast } from 'sonner';
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+interface QuantityControlProps {
+  quantity: number;
+  maxQuantity: number;
+  onQuantityChange: (qty: number) => void;
+}
 
-function StarRow({ rating, size = 'sm' }: { rating: number; size?: 'sm' | 'lg' }) {
-  const cls = size === 'lg' ? 'h-5 w-5' : 'h-4 w-4';
-  const safeRating = rating ?? 0;
+// ─── QUANTITY CONTROL ─────────────────────────────────────────────────────────
+function QuantityControl({ quantity, maxQuantity, onQuantityChange }: QuantityControlProps) {
+  const [inputValue, setInputValue] = useState<string>(quantity.toString());
+  const [holdTimeout, setHoldTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = (value: number) => {
+    const clamped = Math.max(1, Math.min(value, maxQuantity));
+    onQuantityChange(clamped);
+    setInputValue(clamped.toString());
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInputValue(value);
+
+    const num = parseInt(value, 10);
+    if (!isNaN(num) && num > 0) {
+      handleChange(num);
+    }
+  };
+
+  const handleMouseDown = (direction: 'up' | 'down') => {
+    const increment = direction === 'up' ? 1 : -1;
+    let currentQty = quantity;
+
+    const interval = setInterval(() => {
+      currentQty += increment;
+      if (currentQty < 1) currentQty = 1;
+      if (currentQty > maxQuantity) currentQty = maxQuantity;
+      handleChange(currentQty);
+    }, 100);
+
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+    }, 2000);
+
+    setHoldTimeout(timeout);
+  };
+
+  const handleMouseUp = () => {
+    if (holdTimeout) {
+      clearTimeout(holdTimeout);
+      setHoldTimeout(null);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-0.5">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <Star
-          key={i}
-          className={`${cls} ${
-            i < Math.floor(safeRating)
-              ? 'fill-[#3D9B8E] text-[#3D9B8E]'
-              : 'fill-gray-200 text-gray-200 dark:fill-gray-600 dark:text-gray-600'
-          }`}
+    <div className="flex items-center gap-2">
+      <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+        <button
+          onMouseDown={() => handleMouseDown('down')}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          disabled={quantity <= 1}
+          className="px-3 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+          aria-label="Decrease quantity"
+        >
+          −
+        </button>
+        <input
+          type="number"
+          min="1"
+          max={maxQuantity}
+          value={inputValue}
+          onChange={handleInputChange}
+          className="w-12 text-center font-bold py-2 border-0 dark:bg-gray-800 dark:text-white"
         />
-      ))}
+        <button
+          onMouseDown={() => handleMouseDown('up')}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          disabled={quantity >= maxQuantity}
+          className="px-3 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+          aria-label="Increase quantity"
+        >
+          +
+        </button>
+      </div>
+      {maxQuantity < 10 && (
+        <span className="text-xs text-amber-600 dark:text-amber-400">
+          Only {maxQuantity} left
+        </span>
+      )}
     </div>
   );
 }
 
-function ReviewForm({ productId, onPosted }: { productId: string; onPosted: () => void }) {
-  const [rating, setRating] = useState(0);
-  const [hovered, setHovered] = useState(0);
-  const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+// ─── IMAGE CAROUSEL ───────────────────────────────────────────────────────────
+interface ImageCarouselProps {
+  images: string[];
+  productName: string;
+}
 
-  if (!tokenStore.getAccess()) return null;
+function ImageCarousel({ images, productName }: ImageCarouselProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rating) return toast.error('Please select a star rating');
-    setSubmitting(true);
-    try {
-      await addProductReview(productId, { rating, comment: comment.trim() || undefined });
-      toast.success('Review posted!');
-      setRating(0);
-      setComment('');
-      onPosted();
-    } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 409) {
-        toast.error('You have already reviewed this product.');
-      } else {
-        toast.error(err instanceof Error ? err.message : 'Failed to post review');
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const displayImages = images.length > 0 ? images : ['https://via.placeholder.com/500?text=No+Image'];
+
+  const nextImage = useCallback(() => {
+    setCurrentIndex((prev) => (prev + 1) % displayImages.length);
+  }, [displayImages.length]);
+
+  const prevImage = useCallback(() => {
+    setCurrentIndex((prev) => (prev - 1 + displayImages.length) % displayImages.length);
+  }, [displayImages.length]);
 
   return (
-    <form onSubmit={handleSubmit} className="border dark:border-gray-700 rounded-2xl p-4 sm:p-5 space-y-3 bg-gray-50 dark:bg-gray-900/50">
-      <p className="font-semibold dark:text-white text-sm">Leave a Review</p>
-      <div className="flex gap-1">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            onMouseEnter={() => setHovered(i + 1)}
-            onMouseLeave={() => setHovered(0)}
-            onClick={() => setRating(i + 1)}
-            className="p-0.5"
-          >
-            <Star
-              className={`h-6 w-6 transition-colors ${
-                i < (hovered || rating)
-                  ? 'fill-[#3D9B8E] text-[#3D9B8E]'
-                  : 'fill-gray-200 text-gray-200 dark:fill-gray-600'
-              }`}
-            />
-          </button>
-        ))}
+    <div className="space-y-4">
+      {/* Main image */}
+      <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden group">
+        <img
+          src={displayImages[currentIndex]}
+          alt={`${productName} - Image ${currentIndex + 1}`}
+          className="w-full h-full object-cover"
+        />
+
+        {/* Navigation buttons */}
+        {displayImages.length > 1 && (
+          <>
+            <button
+              onClick={prevImage}
+              className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/80 dark:bg-black/60 hover:bg-white dark:hover:bg-black p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label="Previous image"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <button
+              onClick={nextImage}
+              className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/80 dark:bg-black/60 hover:bg-white dark:hover:bg-black p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label="Next image"
+            >
+              <ChevronRight className="h-6 w-6" />
+            </button>
+          </>
+        )}
+
+        {/* Image counter */}
+        {displayImages.length > 1 && (
+          <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm font-medium">
+            {currentIndex + 1} / {displayImages.length}
+          </div>
+        )}
       </div>
-      <textarea
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder="Share your experience (optional)…"
-        rows={3}
-        className="w-full text-sm rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#8B1538]/30"
-      />
-      <button
-        type="submit"
-        disabled={submitting}
-        className="flex items-center gap-2 px-5 py-2 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-60"
-        style={{ background: 'linear-gradient(135deg, #8B1538, #D4828F)' }}
-      >
-        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-        {submitting ? 'Posting…' : 'Post Review'}
-      </button>
-    </form>
+
+      {/* Thumbnail dots */}
+      {displayImages.length > 1 && (
+        <div className="flex justify-center gap-2">
+          {displayImages.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentIndex(idx)}
+              className={`w-2 h-2 rounded-full transition-all ${
+                idx === currentIndex
+                  ? 'bg-[#8B1538] w-6'
+                  : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400'
+              }`}
+              aria-label={`Go to image ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
+// ─── PRODUCT DETAIL PAGE ──────────────────────────────────────────────────────
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { addToCart } = useCart();
-  const [quantity, setQuantity] = useState(1);
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [isFavorited, setIsFavorited] = useState(false);
 
-  const [related, setRelated] = useState<Product[]>([]);
+  // Fetch product
+  useEffect(() => {
+    const loadProduct = async () => {
+      if (!id) {
+        setError('Product not found');
+        setLoading(false);
+        return;
+      }
 
-  const [reviews, setReviews] = useState<ApiReview[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
+      try {
+        setLoading(true);
+        const apiProduct = await fetchProductById(id);
+        const mapped = mapApiProduct(apiProduct as ApiProduct);
+        setProduct(mapped);
+        setError(null);
 
-  const [wishlisted, setWishlisted] = useState(false);
-  const [wishlistLoading, setWishlistLoading] = useState(false);
+        // Set default location if available
+        if ((apiProduct as ApiProduct).location_stock?.[0]) {
+          setSelectedLocation((apiProduct as ApiProduct).location_stock![0].location_id);
+        }
+      } catch (err) {
+        setError('Failed to load product. Please try again.');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+    loadProduct();
+  }, [id]);
 
-  const loadProduct = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    setError('');
+  const maxQuantity = useMemo(() => {
+    if (!product) return 0;
+    const stock = product.inStock;
+    return typeof stock === 'number' ? stock : 0;
+  }, [product]);
+
+  const handleAddToCart = async () => {
+    if (!product || quantity < 1) return;
+
     try {
-      const [raw, summaryRes] = await Promise.all([
-        fetchProductById(id),
-        fetchProductReviewSummary(id).catch(() => null),
-      ]);
-      const mapped = mapApiProduct(raw);
-      setProduct(mapped);
-      setReviewSummary(summaryRes);
-
-      // location_stock on the single-product detail response already carries
-      // branch_name/street/city/state — no separate getStoreLocations call needed.
-      const inStockLocations = (mapped.locationStock ?? []).filter((l: { quantity: number }) => l.quantity > 0);
-      if (inStockLocations.length > 0) {
-        setSelectedLocationId(inStockLocations[0].location_id);
+      setIsAdding(true);
+      // Add to cart multiple times based on selected quantity
+      for (let i = 0; i < quantity; i++) {
+        addToCart(product, selectedLocation ? { locationId: selectedLocation } : undefined);
       }
-
-      if (raw.category?.slug) {
-        const rel = await fetchProducts({ category: raw.category.slug, limit: 5 });
-        setRelated(
-          rel.data
-            .filter((p) => p.id !== id)
-            .slice(0, 4)
-            .map(mapApiProduct)
-        );
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Product not found');
+      toast.success(`${product.name} added to cart`);
+      setQuantity(1);
+    } catch (err) {
+      toast.error('Failed to add to cart');
+      console.error(err);
     } finally {
-      setLoading(false);
+      setIsAdding(false);
     }
-  }, [id]);
-
-  const loadReviews = useCallback(async () => {
-    if (!id) return;
-    setReviewsLoading(true);
-    try {
-      const [listRes, summaryRes] = await Promise.all([
-        fetchProductReviews(id, 1, 10),
-        fetchProductReviewSummary(id).catch(() => null),
-      ]);
-      setReviews(listRes.data);
-      if (summaryRes) setReviewSummary(summaryRes);
-    } catch {}
-    finally { setReviewsLoading(false); }
-  }, [id]);
-
-  useEffect(() => { loadProduct(); }, [loadProduct]);
-  useEffect(() => { loadReviews(); }, [loadReviews]);
-
-  const handleAddToCart = () => {
-    if (!product) return;
-    if ((product.locationStock?.length ?? 0) > 0 && !selectedLocationId) {
-      toast.error('Please choose which location to buy from');
-      return;
-    }
-    const locationLabel = product.locationStock?.find(l => l.location_id === selectedLocationId)?.branch_name;
-    for (let i = 0; i < quantity; i++) {
-      addToCart(product, selectedLocationId ? { locationId: selectedLocationId, locationLabel } : undefined);
-    }
-    toast.success(`${quantity}× ${product.name} added to cart!`);
   };
 
-  const handleWishlist = async () => {
-    if (!id) return;
-    if (!tokenStore.getAccess()) return toast.error('Sign in to save items');
-    setWishlistLoading(true);
-    try {
-      if (wishlisted) {
-        await removeFromWishlist(id);
-        setWishlisted(false);
-        toast.success('Removed from wishlist');
-      } else {
-        await addToWishlist(id);
-        setWishlisted(true);
-        toast.success('Saved to wishlist');
+  const handleShare = async () => {
+    if (!product) return;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: product.name,
+          text: `Check out ${product.name} on Ndeko Express`,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.error('Share failed:', err);
       }
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Wishlist error');
-    } finally {
-      setWishlistLoading(false);
+    } else {
+      // Fallback: copy to clipboard
+      const url = window.location.href;
+      navigator.clipboard.writeText(url);
+      toast.success('Product link copied to clipboard');
     }
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-gray-400">
-          <Loader2 className="h-6 w-6 animate-spin text-[#8B1538]" />
-          <span className="text-sm">Loading product…</span>
-        </div>
+        <Loader2 className="h-8 w-8 animate-spin text-[#8B1538]" />
       </div>
     );
   }
@@ -233,299 +284,214 @@ export function ProductDetail() {
   if (error || !product) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
-        <div className="text-center max-w-sm">
-          <div className="w-16 h-16 rounded-2xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="h-8 w-8 text-red-500" />
+        <Card className="p-8 max-w-md w-full dark:bg-gray-800">
+          <div className="flex items-start gap-4">
+            <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400 shrink-0 mt-1" />
+            <div>
+              <h2 className="font-bold text-lg mb-2 dark:text-white">Error</h2>
+              <p className="text-gray-600 dark:text-gray-400 mb-4">{error || 'Product not found'}</p>
+              <Button
+                onClick={() => navigate('/products')}
+                className="bg-[#8B1538] hover:bg-[#6B0F2A]"
+              >
+                Back to Products
+              </Button>
+            </div>
           </div>
-          <h1 className="text-xl font-bold mb-2 dark:text-white">Product Not Found</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">{error || 'This product may have been removed.'}</p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button onClick={loadProduct} variant="outline" className="flex items-center gap-2 dark:border-gray-700 dark:text-white">
-              <RefreshCw className="h-4 w-4" /> Retry
-            </Button>
-            <Button asChild className="bg-[#8B1538] hover:bg-[#6B0F2A]">
-              <Link to="/products">Browse Products</Link>
-            </Button>
-          </div>
-        </div>
+        </Card>
       </div>
     );
   }
 
+  const images = product.image ? [product.image] : [];
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="container mx-auto px-4 py-6 sm:py-8 max-w-6xl">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
 
-        <div className="mb-5">
-          <Button variant="ghost" asChild className="text-sm dark:text-gray-300 -ml-2">
-            <Link to="/products">
-              <ArrowLeft className="h-4 w-4 mr-1.5" />
-              Back to Products
-            </Link>
-          </Button>
-        </div>
+        {/* Back button */}
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/products')}
+          className="mb-4 -ml-2 text-gray-600 dark:text-gray-400"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
 
-        <div className="bg-white dark:bg-gray-800 dark:border dark:border-gray-700 rounded-2xl p-5 sm:p-8 mb-10">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+        {/* Main content */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-10">
 
-            <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-700">
-              <img
-                src={product.image}
-                alt={product.name}
-                className="w-full h-full object-cover"
-              />
-              {product.discount && (
-                <Badge className="absolute top-3 left-3 sm:top-4 sm:left-4 bg-[#D4828F] text-white text-sm sm:text-base px-2.5 py-1">
-                  -{product.discount}% OFF
-                </Badge>
-              )}
-              {!product.inStock && (
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                  <span className="bg-white text-gray-800 font-bold px-4 py-2 rounded-xl text-sm">Out of Stock</span>
-                </div>
-              )}
-            </div>
+          {/* Images */}
+          <div>
+            <ImageCarousel images={images} productName={product.name} />
+          </div>
 
-            <div className="flex flex-col">
-              {product.brand && (
-                <p className="text-xs font-semibold text-[#3D9B8E] uppercase tracking-widest mb-2">{product.brand}</p>
-              )}
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold dark:text-white mb-3 leading-tight">
-                {product.name}
-              </h1>
-
-              <div className="flex items-center gap-2 mb-4">
-                <StarRow rating={reviewSummary?.avg_rating ?? 0} size="lg" />
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {(reviewSummary?.avg_rating ?? 0).toFixed(1)} ({reviewSummary?.total_reviews ?? 0} review{(reviewSummary?.total_reviews ?? 0) !== 1 ? 's' : ''})
-                </span>
-              </div>
-
-              <div className="border-t dark:border-gray-700 border-b dark:border-b-gray-700 py-4 mb-5">
-                <div className="flex flex-wrap items-baseline gap-2 sm:gap-3">
-                  <span className="text-3xl sm:text-4xl font-bold text-[#8B1538]">
-                    ₦{(product.price ?? 0).toLocaleString()}
-                  </span>
-                  {product.originalPrice && (
-                    <>
-                      <span className="text-lg sm:text-xl text-gray-400 line-through">
-                        ₦{(product.originalPrice ?? 0).toLocaleString()}
-                      </span>
-                      <Badge className="bg-[#3D9B8E] hover:bg-[#2F7C72] text-xs">
-                        Save ₦{((product.originalPrice ?? 0) - (product.price ?? 0)).toLocaleString()}
-                      </Badge>
-                    </>
+          {/* Product info */}
+          <div>
+            {/* Header */}
+            <div className="mb-4">
+              <div className="flex items-start justify-between gap-4 mb-3">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-bold dark:text-white mb-2">
+                    {product.name}
+                  </h1>
+                  {product.brand && (
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
+                      Brand: <span className="font-medium">{product.brand}</span>
+                    </p>
                   )}
                 </div>
-              </div>
-
-              <div className="mb-5">
-                <h2 className="font-semibold mb-1.5 dark:text-white text-sm">Description</h2>
-                <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">{product.description}</p>
-              </div>
-
-              <div className="mb-5">
-                <p className="text-sm font-semibold dark:text-white mb-2">Quantity</p>
-                <div className="flex items-center border dark:border-gray-600 rounded-xl w-fit overflow-hidden">
+                <div className="flex gap-2">
                   <button
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-white transition-colors text-lg font-medium"
+                    onClick={() => setIsFavorited(!isFavorited)}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    aria-label="Add to favorites"
                   >
-                    −
+                    <Heart
+                      className={`h-6 w-6 ${
+                        isFavorited
+                          ? 'fill-red-600 text-red-600'
+                          : 'text-gray-400 dark:text-gray-600'
+                      }`}
+                    />
                   </button>
-                  <span className="px-5 py-2.5 font-bold dark:text-white text-base min-w-[3rem] text-center border-x dark:border-gray-600">
-                    {quantity}
-                  </span>
                   <button
-                    onClick={() => setQuantity(quantity + 1)}
-                    className="px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-white transition-colors text-lg font-medium"
+                    onClick={handleShare}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    aria-label="Share product"
                   >
-                    +
+                    <Share2 className="h-6 w-6 text-gray-600 dark:text-gray-400" />
                   </button>
                 </div>
               </div>
 
-              {(product.locationStock?.filter(l => l.quantity > 0).length ?? 0) > 1 && (
-                <div className="mb-5">
-                  <p className="text-sm font-semibold dark:text-white mb-2">Buy from</p>
-                  <div className="flex flex-wrap gap-2">
-                    {(product.locationStock ?? [])
-                      .filter(l => l.quantity > 0)
-                      .map(l => {
-                        const active = selectedLocationId === l.location_id;
-                        return (
-                          <button
-                            key={l.location_id}
-                            type="button"
-                            onClick={() => setSelectedLocationId(l.location_id)}
-                            className={`px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${
-                              active
-                                ? 'border-[#8B1538] bg-[#8B1538]/5 text-[#8B1538]'
-                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300'
-                            }`}
-                          >
-                            <span className="block font-semibold">{l.branch_name ?? 'Branch'}</span>
-                            <span className="block text-[10px] text-gray-400">
-                              {[l.city, l.state].filter(Boolean).join(', ')}{l.city || l.state ? ' · ' : ''}{l.quantity} in stock
-                            </span>
-                          </button>
-                        );
-                      })}
+              {/* Rating */}
+              {product.rating && (
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star
+                        key={i}
+                        className={`h-4 w-4 ${
+                          i < Math.round(product.rating!)
+                            ? 'fill-yellow-400 text-yellow-400'
+                            : 'text-gray-300'
+                        }`}
+                      />
+                    ))}
                   </div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                    ({product.rating.toFixed(1)})
+                  </span>
                 </div>
               )}
+            </div>
 
-              <div className="flex gap-3 mb-6">
+            {/* Price */}
+            <Card className="p-4 mb-6 dark:bg-gray-800 dark:border-gray-700">
+              <div className="flex items-baseline gap-3 mb-2">
+                <span className="text-3xl font-bold text-[#8B1538]">
+                  ₦{product.price.toLocaleString()}
+                </span>
+                {product.originalPrice && product.originalPrice > product.price && (
+                  <span className="text-lg text-gray-400 line-through">
+                    ₦{product.originalPrice.toLocaleString()}
+                  </span>
+                )}
+              </div>
+              {product.discount && (
+                <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                  Save {product.discount}% on this item
+                </p>
+              )}
+            </Card>
+
+            {/* Stock status */}
+            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Package className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span className="font-medium text-blue-900 dark:text-blue-300">Stock Information</span>
+              </div>
+              <p className={`text-sm ${
+                maxQuantity > 0
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {maxQuantity > 0 ? `${maxQuantity} items available` : 'Out of stock'}
+              </p>
+            </div>
+
+            {/* Location selection (if available) */}
+            {/* This section would show location-based stock if your API provides location_stock */}
+
+            {/* Quantity + Add to cart */}
+            {maxQuantity > 0 ? (
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium mb-2 dark:text-gray-300">
+                    Quantity
+                  </label>
+                  <QuantityControl
+                    quantity={quantity}
+                    maxQuantity={maxQuantity}
+                    onQuantityChange={setQuantity}
+                  />
+                </div>
+
                 <Button
                   onClick={handleAddToCart}
-                  className="flex-1 bg-[#8B1538] hover:bg-[#6B0F2A] h-11 sm:h-12 text-sm sm:text-base shadow-md shadow-[#8B1538]/20"
-                  disabled={!product.inStock}
+                  disabled={isAdding || quantity < 1}
+                  className="w-full bg-[#8B1538] hover:bg-[#6B0F2A] h-12 font-bold text-base"
                 >
-                  <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                  {product.inStock ? 'Add to Cart' : 'Out of Stock'}
+                  {isAdding ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Adding…
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <ShoppingCart className="h-5 w-5" />
+                      Add to Cart
+                    </span>
+                  )}
                 </Button>
-                <button
-                  onClick={handleWishlist}
-                  disabled={wishlistLoading}
-                  className={`h-11 sm:h-12 w-11 sm:w-12 flex-shrink-0 rounded-xl border transition-all flex items-center justify-center ${
-                    wishlisted
-                      ? 'bg-[#FDF2F4] border-[#D4828F] text-[#D4828F] dark:bg-[#8B1538]/20 dark:border-[#D4828F]/50'
-                      : 'border-[#D4828F]/40 text-[#D4828F] hover:bg-[#FDF2F4] dark:hover:bg-[#8B1538]/10'
-                  }`}
-                  aria-label={wishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-                >
-                  {wishlistLoading
-                    ? <Loader2 className="h-4 w-4 animate-spin" />
-                    : <Heart className={`h-4 w-4 sm:h-5 sm:w-5 ${wishlisted ? 'fill-[#D4828F]' : ''}`} />
-                  }
-                </button>
               </div>
+            ) : (
+              <Button disabled className="w-full mb-6 opacity-50">
+                Out of Stock
+              </Button>
+            )}
 
-              <div className="border-t dark:border-gray-700 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  { icon: Truck, title: '10% Cashback', sub: 'On orders over ₦20,000' },
-                  { icon: Shield, title: 'Secure Payment', sub: '100% protected checkout' },
-                ].map(({ icon: Icon, title, sub }) => (
-                  <div key={title} className="flex items-center gap-3">
-                    <div className="bg-[#FDF2F4] dark:bg-[#8B1538]/20 p-2 rounded-lg flex-shrink-0">
-                      <Icon className="h-4 w-4 text-[#8B1538]" />
-                    </div>
-                    <div>
-                      <p className="font-semibold dark:text-white text-sm">{title}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{sub}</p>
-                    </div>
-                  </div>
-                ))}
+            {/* Description */}
+            {product.description && (
+              <Card className="p-4 dark:bg-gray-800 dark:border-gray-700">
+                <h3 className="font-bold mb-3 dark:text-white">About this product</h3>
+                <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">
+                  {product.description}
+                </p>
+              </Card>
+            )}
+
+            {/* Delivery info */}
+            <div className="mt-6 space-y-3 text-sm">
+              <div className="flex items-start gap-3">
+                <Truck className="h-5 w-5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium dark:text-white">Free Delivery</p>
+                  <p className="text-gray-600 dark:text-gray-400">On orders over ₦20,000</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <MapPin className="h-5 w-5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium dark:text-white">Delivery Across Nigeria</p>
+                  <p className="text-gray-600 dark:text-gray-400">Fast & reliable shipping</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
-
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg sm:text-xl font-bold dark:text-white flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-[#8B1538]" />
-              Reviews
-              {(reviewSummary?.total_reviews ?? 0) > 0 && (
-                <span className="text-sm font-normal text-gray-400 dark:text-gray-500">({reviewSummary!.total_reviews})</span>
-              )}
-            </h2>
-            {reviewSummary && reviewSummary.avg_rating != null && (
-              <div className="flex flex-wrap items-center gap-4 mt-2 mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-3xl font-black text-gray-800 dark:text-white">{reviewSummary.avg_rating.toFixed(1)}</span>
-                  <div>
-                    <div className="flex gap-0.5">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <Star key={i} className="h-4 w-4" fill={i < Math.round(reviewSummary.avg_rating!) ? '#F59E0B' : '#E5E7EB'} stroke="none" />
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{reviewSummary.total_reviews} review{reviewSummary.total_reviews !== 1 ? 's' : ''}</p>
-                  </div>
-                </div>
-                {reviewSummary.verified_count != null && reviewSummary.verified_count > 0 && (
-                  <span className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full font-medium">
-                    {reviewSummary.verified_count} verified purchase{reviewSummary.verified_count !== 1 ? 's' : ''}
-                  </span>
-                )}
-                <div className="flex flex-col gap-0.5 ml-auto">
-                  {[5,4,3,2,1].map(star => {
-                    const count = reviewSummary.breakdown?.[String(star)] ?? 0;
-                    const pct = reviewSummary.total_reviews > 0 ? (count / reviewSummary.total_reviews) * 100 : 0;
-                    return (
-                      <div key={star} className="flex items-center gap-1.5">
-                        <span className="text-xs text-gray-400 w-2">{star}</span>
-                        <Star className="h-3 w-3 text-amber-400 fill-amber-400" />
-                        <div className="w-20 h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
-                          <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs text-gray-400 w-3">{count}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mb-5">
-            <ReviewForm productId={id!} onPosted={loadReviews} />
-          </div>
-
-          {reviewsLoading ? (
-            <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading reviews…
-            </div>
-          ) : reviews.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 dark:text-gray-500">
-              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No reviews yet — be the first!</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {reviews.map((r) => (
-                <div key={r.id} className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-2xl p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-full bg-[#8B1538]/10 flex items-center justify-center flex-shrink-0 text-xs font-bold text-[#8B1538]">
-                      {r.reviewer ? `${r.reviewer.first_name[0]}${r.reviewer.last_name[0]}`.toUpperCase() : <User className="h-4 w-4 text-[#8B1538]" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <p className="font-semibold dark:text-white text-sm">
-                          {r.reviewer ? `${r.reviewer.first_name} ${r.reviewer.last_name[0]}.` : 'Anonymous'}
-                        </p>
-                        {r.is_verified_purchase && (
-                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full font-medium">
-                            Verified Purchase
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">
-                          {new Date(r.created_at).toLocaleDateString('en-NG', { year: 'numeric', month: 'short', day: 'numeric' })}
-                        </span>
-                      </div>
-                      <StarRow rating={r.rating ?? 0} />
-                      {r.comment && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 leading-relaxed">{r.comment}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {related.length > 0 && (
-          <section>
-            <h2 className="text-lg sm:text-xl font-bold dark:text-white mb-4">Related Products</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-              {related.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </div>
-          </section>
-        )}
-
       </div>
     </div>
   );
