@@ -24,6 +24,8 @@ import { VendorSearch } from './pages/VendorSearch';
 import { BusinessDashboard } from './pages/business/BusinessDashboard';
 import { BusinessInventory } from './pages/business/BusinessInventory';
 import { BusinessOrders } from './pages/business/BusinessOrders';
+import { BusinessOrderDetail } from './pages/business/Businessorderdetail';
+import { BusinessInventoryDetail } from './pages/business/Businessinventorydetail';
 import { BusinessStorefront } from './pages/business/BusinessStorefront';
 import { BusinessAnalytics } from './pages/business/BusinessAnalytics';
 import { BusinessSettings } from './pages/business/BusinessSettings';
@@ -36,6 +38,75 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+
+// ── Reusable Error Components ────────────────────────────────────────────────
+
+interface RouteErrorComponentProps {
+  title?: string;
+  message: string;
+  backUrl?: string;
+  backLabel?: string;
+  fullPage?: boolean;
+}
+
+function RouteErrorComponent({
+  title = 'Error',
+  message,
+  backUrl = '/',
+  backLabel = 'Go Home',
+  fullPage = false,
+}: RouteErrorComponentProps) {
+  if (fullPage) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <h1 className="text-xl font-bold dark:text-white mb-2">{title}</h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">{message}</p>
+          <a
+            href={backUrl}
+            className="inline-block px-4 py-2 rounded-lg bg-[#8B1538] text-white font-medium hover:bg-[#6B0F2A] transition-colors"
+          >
+            {backLabel}
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 text-center">
+      <p className="text-red-600 dark:text-red-400 mb-3">{message}</p>
+      <a href={backUrl} className="text-sm text-[#8B1538] hover:underline font-medium">
+        {backLabel}
+      </a>
+    </div>
+  );
+}
+
+function AccessDeniedComponent() {
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
+      <div className="text-center max-w-sm">
+        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center">
+          <span className="text-2xl">🔒</span>
+        </div>
+        <h1 className="text-xl font-bold dark:text-white mb-2">Access Denied</h1>
+        <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
+          Only sellers can access the business portal. Switch to a seller account or create one.
+        </p>
+        <a
+          href="/"
+          className="inline-block px-4 py-2 rounded-lg bg-[#8B1538] text-white font-medium hover:bg-[#6B0F2A] transition-colors"
+        >
+          Go Home
+        </a>
+      </div>
+    </div>
+  );
+}
 
 // ── Error Boundary ───────────────────────────────────────────────────────────
 interface ErrorBoundaryProps {
@@ -65,29 +136,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
-          <div className="text-center max-w-sm">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
-              <span className="text-2xl">⚠️</span>
-            </div>
-            <h1 className="text-xl font-bold dark:text-white mb-2">Something went wrong</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
-              {this.state.error?.message || 'An unexpected error occurred'}
-            </p>
-            <button
-              onClick={() => this.setState({ hasError: false })}
-              className="px-4 py-2 rounded-lg bg-[#8B1538] text-white font-medium hover:bg-[#6B0F2A] transition-colors"
-            >
-              Try Again
-            </button>
-            <a
-              href="/"
-              className="block mt-3 text-sm text-[#8B1538] hover:underline"
-            >
-              Go to Home
-            </a>
-          </div>
-        </div>
+        <RouteErrorComponent
+          title="Something went wrong"
+          message={this.state.error?.message || 'An unexpected error occurred'}
+          backUrl="/"
+          backLabel="Try Again"
+          fullPage
+        />
       );
     }
 
@@ -165,7 +220,7 @@ function SellerRoute() {
 
   const isSeller = user.role === 'seller' || user.role === 'admin';
   if (!isSeller) {
-    return <Navigate to="/" replace />;
+    return <AccessDeniedComponent />;
   }
 
   return <Outlet />;
@@ -202,10 +257,6 @@ function BusinessRoot() {
   );
 }
 
-function BusinessLayoutWrapper() {
-  return <BusinessLayout />;
-}
-
 // ── Route Configuration ──────────────────────────────────────────────────────
 
 const authRoutes: RouteObject[] = [
@@ -213,16 +264,27 @@ const authRoutes: RouteObject[] = [
     path: '/login',
     Component: LoginRoot,
     errorElement: (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center max-w-sm">
-          <h1 className="text-2xl font-bold dark:text-white mb-2">Error</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">Failed to load login page</p>
-          <a href="/" className="text-[#8B1538] hover:underline">
-            Go Home
-          </a>
-        </div>
-      </div>
+      <RouteErrorComponent
+        title="Login Error"
+        message="Failed to load login page"
+        backUrl="/"
+        fullPage
+      />
     ),
+  },
+  {
+    path: '/logout',
+    loader: async () => {
+      // Call logout API endpoint
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (error) {
+        console.error('Logout failed:', error);
+      }
+      // Redirect to home
+      window.location.href = '/';
+      return null;
+    },
   },
 ];
 
@@ -231,113 +293,167 @@ const businessRoutes: RouteObject[] = [
     path: '/business',
     Component: BusinessRoot,
     errorElement: (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold dark:text-white mb-2">Business Portal Error</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">Failed to load business section</p>
-          <a href="/" className="text-[#8B1538] hover:underline">
-            Go Home
-          </a>
-        </div>
-      </div>
+      <RouteErrorComponent
+        title="Business Portal Error"
+        message="Failed to load business section"
+        backUrl="/"
+        fullPage
+      />
     ),
     children: [
       {
-        element: <BusinessLayoutWrapper />,
+        Component: BusinessLayout,
+        errorElement: (
+          <RouteErrorComponent
+            title="Business Layout Error"
+            message="Failed to load business layout"
+            backUrl="/"
+            fullPage
+          />
+        ),
         children: [
           {
             index: true,
             Component: BusinessDashboard,
             errorElement: (
-              <div className="p-6">
-                <div className="text-center">
-                  <p className="text-red-600 dark:text-red-400">Failed to load dashboard</p>
-                  <a href="/business" className="text-[#8B1538] hover:underline text-sm">
-                    Reload
-                  </a>
-                </div>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load dashboard"
+                backUrl="/business"
+                backLabel="Back to Business"
+              />
             ),
           },
           {
             path: 'inventory',
-            Component: BusinessInventory,
-            errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load inventory</p>
-              </div>
-            ),
+            children: [
+              {
+                index: true,
+                Component: BusinessInventory,
+                errorElement: (
+                  <RouteErrorComponent
+                    message="Failed to load inventory"
+                    backUrl="/business"
+                  />
+                ),
+              },
+              {
+                path: ':id',
+                Component: BusinessInventoryDetail,
+                errorElement: (
+                  <RouteErrorComponent
+                    message="Failed to load inventory item"
+                    backUrl="/business/inventory"
+                    backLabel="Back to Inventory"
+                  />
+                ),
+              },
+              {
+                path: ':id/edit',
+                Component: BusinessInventoryDetail,
+                errorElement: (
+                  <RouteErrorComponent
+                    message="Failed to load inventory editor"
+                    backUrl="/business/inventory"
+                    backLabel="Back to Inventory"
+                  />
+                ),
+              },
+            ],
           },
           {
             path: 'orders',
-            Component: BusinessOrders,
-            errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load orders</p>
-              </div>
-            ),
+            children: [
+              {
+                index: true,
+                Component: BusinessOrders,
+                errorElement: (
+                  <RouteErrorComponent
+                    message="Failed to load orders"
+                    backUrl="/business"
+                  />
+                ),
+              },
+              {
+                path: ':id',
+                Component: BusinessOrderDetail,
+                errorElement: (
+                  <RouteErrorComponent
+                    message="Failed to load order details"
+                    backUrl="/business/orders"
+                    backLabel="Back to Orders"
+                  />
+                ),
+              },
+            ],
           },
           {
             path: 'storefront',
             Component: BusinessStorefront,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load storefront</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load storefront"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'analytics',
             Component: BusinessAnalytics,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load analytics</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load analytics"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'reviews',
             Component: BusinessReviews,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load reviews</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load reviews"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'logistics',
             Component: BusinessLogistics,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load logistics</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load logistics"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'settings',
             Component: BusinessSettings,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load settings</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load settings"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'notifications',
             Component: BusinessNotifications,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load notifications</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load notifications"
+                backUrl="/business"
+              />
             ),
           },
           {
             path: 'vendors',
             Component: VendorSearch,
             errorElement: (
-              <div className="p-6">
-                <p className="text-red-600 dark:text-red-400">Failed to load vendors</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load vendors"
+                backUrl="/business"
+              />
             ),
           },
         ],
@@ -351,15 +467,12 @@ const buyerRoutes: RouteObject[] = [
     path: '/',
     Component: BuyerRoot,
     errorElement: (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold dark:text-white mb-2">Page Error</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">Something went wrong</p>
-          <a href="/" className="text-[#8B1538] hover:underline">
-            Go Home
-          </a>
-        </div>
-      </div>
+      <RouteErrorComponent
+        title="Page Error"
+        message="Something went wrong"
+        backUrl="/"
+        fullPage
+      />
     ),
     children: [
       // Public routes
@@ -367,81 +480,91 @@ const buyerRoutes: RouteObject[] = [
         index: true,
         Component: Home,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load home page</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load home page"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'products',
         Component: Products,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load products</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load products"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'product/:id',
         Component: ProductDetail,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load product details</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load product details"
+            backUrl="/products"
+            backLabel="Back to Products"
+          />
         ),
       },
       {
         path: 'deals',
         Component: Deals,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load deals</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load deals"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'cart',
         Component: Cart,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load cart</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load cart"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'wishlist',
         Component: Wishlist,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load wishlist</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load wishlist"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'help',
         Component: Help,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load help</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load help"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'contact',
         Component: Contact,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load contact</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load contact"
+            backUrl="/"
+          />
         ),
       },
       {
         path: 'vendors',
         Component: VendorSearch,
         errorElement: (
-          <div className="p-6 text-center">
-            <p className="text-red-600 dark:text-red-400">Failed to load vendors</p>
-          </div>
+          <RouteErrorComponent
+            message="Failed to load vendors"
+            backUrl="/"
+          />
         ),
       },
 
@@ -449,41 +572,44 @@ const buyerRoutes: RouteObject[] = [
       {
         element: <PrivateRoute />,
         errorElement: (
-          <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-red-600 dark:text-red-400 mb-4">Authentication error</p>
-              <a href="/login" className="text-[#8B1538] hover:underline">
-                Go to Login
-              </a>
-            </div>
-          </div>
+          <RouteErrorComponent
+            title="Authentication Error"
+            message="You must be logged in to access this page"
+            backUrl="/login"
+            backLabel="Go to Login"
+            fullPage
+          />
         ),
         children: [
           {
             path: 'account',
             Component: Account,
             errorElement: (
-              <div className="p-6 text-center">
-                <p className="text-red-600 dark:text-red-400">Failed to load account</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load account"
+                backUrl="/"
+              />
             ),
           },
           {
             path: 'checkout',
             Component: Checkout,
             errorElement: (
-              <div className="p-6 text-center">
-                <p className="text-red-600 dark:text-red-400">Failed to load checkout</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load checkout"
+                backUrl="/cart"
+                backLabel="Back to Cart"
+              />
             ),
           },
           {
             path: 'order-confirmation',
             Component: OrderConfirmation,
             errorElement: (
-              <div className="p-6 text-center">
-                <p className="text-red-600 dark:text-red-400">Failed to load order confirmation</p>
-              </div>
+              <RouteErrorComponent
+                message="Failed to load order confirmation"
+                backUrl="/"
+              />
             ),
           },
         ],
