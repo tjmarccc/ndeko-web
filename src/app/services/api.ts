@@ -157,6 +157,7 @@ export interface ApiProduct {
   price: number;
   discount_price?: number | null;
   stock_quantity: number;
+  restock_threshold?: number | null;
   total_sold?: number;
   stock_status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'reserved';
   images: string[];
@@ -845,10 +846,14 @@ export const fetchProducts = async (params?: {
   page?: number;
   limit?: number;
   search?: string;
-  category?: string;
+  // Backend filters by `category_slug` (e.g. "beauty") or `category_id` — NOT
+  // `category`, which Zod silently strips (returning the full catalog).
+  category_slug?: string;
+  category_id?: string;
   store_id?: string;
   min_price?: number;
   max_price?: number;
+  in_stock?: boolean;
 }): Promise<PaginatedResponse<ApiProduct>> => {
   try {
     const response = await apiClient.get<PaginatedResponse<ApiProduct>>(
@@ -1169,11 +1174,15 @@ export interface StoreOverview {
   orders: number;
   avg_order_value: number;
   conversion_rate: number;
+  new_products: number;
+  new_customers: number;
   deltas: {
     revenue: number | null;
     orders: number | null;
     avg_order_value: number | null;
     conversion_rate: number | null;
+    new_products: number | null;
+    new_customers: number | null;
   };
 }
 
@@ -1319,6 +1328,9 @@ export interface ProductWriteBody {
   images?: string[];
   is_active?: boolean;
   stock_by_location?: LocationStock[];
+  // Optional int ≥0; omit/null → backend default of 5. Product flags
+  // low_stock when total stock ≤ this threshold.
+  restock_threshold?: number | null;
 }
 
 export const getStoreProducts = async (
@@ -1569,6 +1581,158 @@ export const getWalletTransactions = async (
 
 
 
+
+// ── Store Notifications (Recent Activity feed + 🔔 bell) ──────────────────────
+export type StoreNotificationType =
+  | 'order_placed'
+  | 'order_delivered'
+  | 'review_received'
+  | 'low_stock';
+
+export interface StoreNotification {
+  id: string;
+  type: StoreNotificationType;
+  title?: string;
+  message: string;
+  is_read: boolean;
+  // Arbitrary event payload (order id, amount, product name, rating, units…).
+  data?: Record<string, any>;
+  // Structured event metadata — e.g. `stock_quantity` on low_stock events.
+  meta?: Record<string, any>;
+  created_at: string;
+}
+
+export const getStoreNotifications = async (
+  storeId: string,
+  page = 1,
+  limit = 20,
+  unreadOnly = false
+): Promise<PaginatedResponse<StoreNotification>> => {
+  try {
+    // Paginated envelope uses `meta`, like getStoreOrders.
+    const response = await apiClient.get<{
+      data: StoreNotification[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/api/v1/notifications/stores/${storeId}`, {
+      params: { page, limit, unread_only: unreadOnly || undefined },
+    });
+    return {
+      data: response.data.data ?? [],
+      total: response.data.meta?.total ?? 0,
+      page: response.data.meta?.page ?? page,
+      limit: response.data.meta?.limit ?? limit,
+    };
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreUnreadCount = async (storeId: string): Promise<number> => {
+  try {
+    const response = await apiClient.get<{ data: { unread_count: number } }>(
+      `/api/v1/notifications/stores/${storeId}/unread-count`
+    );
+    return response.data.data?.unread_count ?? 0;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const markStoreNotificationRead = async (
+  storeId: string,
+  notificationId: string
+): Promise<any> => {
+  try {
+    const response = await apiClient.patch(
+      `/api/v1/notifications/stores/${storeId}/${notificationId}/read`
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const markAllStoreNotificationsRead = async (storeId: string): Promise<any> => {
+  try {
+    const response = await apiClient.patch(
+      `/api/v1/notifications/stores/${storeId}/read-all`
+    );
+    return response.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Store Customers (Total Customers card + customer book) ─────────────────────
+export interface StoreCustomer {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  avatar_url?: string;
+  total_orders?: number;
+  total_spent?: number;
+  last_order_at?: string;
+}
+
+export const getStoreCustomers = async (
+  storeId: string,
+  page = 1,
+  limit = 20
+): Promise<PaginatedResponse<StoreCustomer>> => {
+  try {
+    // meta.total is COUNT(DISTINCT buyer_id) — the Total Customers figure.
+    const response = await apiClient.get<{
+      data: StoreCustomer[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/api/v1/orders/stores/${storeId}/customers`, {
+      params: { page, limit },
+    });
+    return {
+      data: response.data.data ?? [],
+      total: response.data.meta?.total ?? 0,
+      page: response.data.meta?.page ?? page,
+      limit: response.data.meta?.limit ?? limit,
+    };
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// ── Seller-side Reviews (summary + moderation feed) ───────────────────────────
+export const getStoreReviewSummary = async (storeId: string): Promise<ReviewSummary> => {
+  try {
+    const response = await apiClient.get<{ data: ReviewSummary }>(
+      `/api/v1/reviews/stores/${storeId}/summary`
+    );
+    return response.data.data;
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+export const getStoreReviewModeration = async (
+  storeId: string,
+  page = 1,
+  limit = 20
+): Promise<PaginatedResponse<ApiReview>> => {
+  try {
+    const response = await apiClient.get<{
+      data: ApiReview[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/api/v1/reviews/stores/${storeId}/moderation`, {
+      params: { page, limit },
+    });
+    return {
+      data: response.data.data ?? [],
+      total: response.data.meta?.total ?? 0,
+      page: response.data.meta?.page ?? page,
+      limit: response.data.meta?.limit ?? limit,
+    };
+  } catch (error) {
+    handleError(error);
+  }
+};
 
 // ── Public Store Endpoints ────────────────────────────────────────────────────
 /**

@@ -126,6 +126,7 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
 interface ProductFormData {
   name: string; description: string; price: string;
   discount_price: string; cost_price: string; stock_quantity: string;
+  restock_threshold: string;
   category_id: string; images: string[]; is_active: boolean;
   location_id: string;
 }
@@ -152,6 +153,8 @@ function ProductModal({
     discount_price: product?.discount_price ? String(product.discount_price) : '',
     cost_price: '',
     stock_quantity: product?.stock_quantity ? String(product.stock_quantity) : '',
+    restock_threshold:
+      product?.restock_threshold != null ? String(product.restock_threshold) : '',
     category_id: product?.category?.id ?? (categories[0]?.id ?? ''),
     images: product?.images ?? [],
     is_active: product?.is_active ?? true,
@@ -185,6 +188,10 @@ function ProductModal({
         images: form.images,
         is_active: form.is_active,
         stock_by_location: [{ location_id: form.location_id, quantity: parseInt(form.stock_quantity, 10) }],
+        // Omit when blank so the backend applies its default of 5.
+        restock_threshold: form.restock_threshold.trim()
+          ? parseInt(form.restock_threshold, 10)
+          : undefined,
       };
       const saved = mode === 'add'
         ? await createProduct(storeId, body)
@@ -252,6 +259,11 @@ function ProductModal({
             <div className="inv-field">
               <label htmlFor="product-stock-quantity">Stock Quantity *</label>
               <input id="product-stock-quantity" name="stockQuantity" type="number" value={form.stock_quantity} onChange={set('stock_quantity')} placeholder="0" min="0" step="1" />
+            </div>
+
+            <div className="inv-field">
+              <label htmlFor="product-restock-threshold">Restock Threshold <span style={{ color: '#9ca3af', fontWeight: 400 }}>— low-stock alert at</span></label>
+              <input id="product-restock-threshold" name="restockThreshold" type="number" value={form.restock_threshold} onChange={set('restock_threshold')} placeholder="5" min="0" step="1" />
             </div>
 
             <div className="inv-field">

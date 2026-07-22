@@ -112,7 +112,14 @@ export function Products() {
           page,
           limit: PAGE_SIZE,
         };
-        if (selectedCategory !== 'all') params.category = selectedCategory;
+        if (selectedCategory !== 'all') {
+          // selectedCategory may hold a slug or a category id — resolve to the
+          // slug the backend filters on.
+          const match = categories.find(
+            (c) => c.id === selectedCategory || c.slug === selectedCategory
+          );
+          params.category_slug = match?.slug ?? selectedCategory;
+        }
         if (debouncedPrice[0] > 0) params.min_price = debouncedPrice[0];
         if (debouncedPrice[1] < MAX_PRICE) params.max_price = debouncedPrice[1];
 
@@ -148,7 +155,7 @@ export function Products() {
       }
     },
     // debouncedPrice here (not priceRange) — prevents re-fetch on every slider tick
-    [selectedCategory, debouncedPrice, searchQuery]
+    [selectedCategory, debouncedPrice, searchQuery, categories]
   );
 
   // Re-fetch when filters/search change
