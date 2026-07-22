@@ -151,7 +151,7 @@ export function Deals() {
       const res = await fetchProducts({
         page: pageNum,
         limit: LIMIT,
-        ...(catSlug ? { category: catSlug } : {}),
+        ...(catSlug ? { category_slug: catSlug } : {}),
       });
 
       // fetchProducts returns PaginatedResponse<ApiProduct> when no id is passed
